@@ -1,173 +1,176 @@
+
 #!/bin/bash
 
-# 确保脚本以 root 权限运行
-if [ "$(id -u)" -ne "0" ]; then
-	    echo "请使用 root 权限运行此脚本！"
-	        exit 1
-fi
+# Function to display a progress bar for countdown
+progress_bar() {
+    local duration=$1
+    local bar_length=30 # Adjust the length of the progress bar
+    for ((i=0; i<=duration; i++)); do
+        local filled=$((i * bar_length / duration))
+        printf "
+["
+        for ((j=0; j<filled; j++)); do printf "="; done
+        for ((j=filled; j<bar_length; j++)); do printf " "; done
+        printf "] %d/%d seconds" $i $duration
+        sleep 1
+    done
+    echo ""
+}
 
-# 输出彩色提示信息函数
-function echo_color {
-	    echo -e "\033[1;32m$1\033[0m"
-    }
+# Detect the Linux distribution
+detect_distro() {
+    if [ -f /etc/os-release ]; then
+        . /etc/os-release
+        DISTRO=$ID
+    else
+        printf "[1;31m无法检测到 Linux 发行版。请手动检查。[0m
+"
+        exit 1
+    fi
+}
 
-# 1. 系统更新
-echo_color "查找当前系统的更新内容并将所有可用更新应用到本机"
-echo_color "正在更新系统..."
-if [[ -f /etc/debian_version ]]; then
-	    apt update && apt upgrade -y && apt dist-upgrade -y
-    elif [[ -f /etc/centos-release ]]; then
-	        yum update -y
-	else
-		    echo_color "未知的操作系统，无法执行更新"
-		        exit 1
-fi
-echo_color "系统更新完成！"
+# Step 1: Install dependencies
+step1_install_dependencies() {
+    detect_distro
 
-# 2. 安装常用依赖
-echo_color "安装 wget curl vim mtr ufw ntpdate sudo unzip 到本机"
-echo_color "正在安装常用依赖..."
-if [[ -f /etc/debian_version ]]; then
-	    apt install -y wget curl vim mtr ufw ntpdate sudo unzip
-    elif [[ -f /etc/centos-release ]]; then
-	        yum install -y wget curl vim mtr ufw ntpdate sudo unzip
-	else
-		    echo_color "未知的操作系统，无法安装依赖"
-		        exit 1
-fi
-echo_color "常用依赖安装完成！"
+    printf "[1;31m****************************************[0m
+"
+    printf "[1;31m*      正在安装基础依赖...          *[0m
+"
+    printf "[1;31m****************************************[0m
+"
 
-# 3. 设置时区并同步时间
-echo_color "设置时区为 Asia/Shanghai，设置时区完成之后进行时间同步"
-echo_color "正在设置时区为 Asia/Shanghai..."
-timedatectl set-timezone Asia/Shanghai
-echo_color "时区设置完成！"
+    case $DISTRO in
+        ubuntu|debian)
+            sudo apt update
+            sudo apt install -y wget curl vim mtr ufw ntpdate sudo unzip
+            ;;
+        centos|rocky|almalinux)
+            sudo yum install -y epel-release
+            sudo yum install -y wget curl vim mtr ufw ntpdate sudo unzip
+            ;;
+        *)
+            printf "[1;31m不支持的 Linux 发行版：$DISTRO[0m
+"
+            exit 1
+            ;;
+    esac
 
-echo_color "正在同步时间..."
-ntpdate cn.pool.ntp.org
-echo_color "时间同步完成！"
+    printf "[1;31m基础依赖已经安装完成，3秒后进行下一步操作[0m
+"
+    progress_bar 3
+}
 
-# 4. 安装 UFW 并应用规则
-echo_color "安装 UFW 并添加常用规则"
-echo_color "正在安装 UFW..."
-if [[ -f /etc/debian_version ]]; then
-	    apt install -y ufw
-    elif [[ -f /etc/centos-release ]]; then
-	        yum install -y ufw
-	else
-		    echo_color "未知的操作系统，无法安装 ufw"
-		        exit 1
-fi
+# Step 2: Update the system
+step2_update_system() {
+    printf "[1;33m****************************************[0m
+"
+    printf "[1;33m*         正在更新系统...             *[0m
+"
+    printf "[1;33m****************************************[0m
+"
 
-echo_color "正在应用 UFW 规则..."
-ufw allow 22/tcp
-ufw allow 22/udp
-ufw allow 80/tcp
-ufw allow 80/udp
-ufw allow 88/tcp
-ufw allow 88/udp
-ufw allow 443/tcp
-ufw allow 443/udp
-ufw allow 5555/tcp
-ufw allow 5555/udp
-ufw allow 8008/tcp
-ufw allow 8008/udp
-ufw allow 32767/tcp
-ufw allow 32767/udp
-ufw allow 32768/tcp
-ufw allow 32768/udp
-ufw deny from 162.142.125.0/24
-ufw deny from 167.94.138.0/24
-ufw deny from 167.94.145.0/24
-ufw deny from 167.94.146.0/24
-ufw deny from 167.248.133.0/24
-ufw deny from 199.45.154.0/24
-ufw deny from 199.45.155.0/24
-ufw deny from 206.168.34.0/24
-ufw deny from 2602:80d:1000:b0cc:e::/80
-ufw deny from 2620:96:e000:b0cc:e::/80
-ufw deny from 2602:80d:1003::/112
-ufw deny from 2602:80d:1004::/112
+    case $DISTRO in
+        ubuntu|debian)
+            sudo apt update && sudo apt upgrade -y
+            ;;
+        centos|rocky|almalinux)
+            sudo yum update -y
+            ;;
+    esac
 
-# 启用 UFW 防火墙，自动确认
-echo "y" | ufw enable
+    printf "[1;33m当前系统已应用最新的更新，3秒后进行下一步操作[0m
+"
+    progress_bar 3
+}
 
-echo_color "UFW 安全规则应用完成！"
+# Step 3: Set timezone and sync time
+step3_set_timezone_and_sync_time() {
+    printf "[1;34m****************************************[0m
+"
+    printf "[1;34m*   设置时区为亚洲/上海...            *[0m
+"
+    printf "[1;34m****************************************[0m
+"
 
-# 5. 检测内存和硬盘空间并生成SWAP
-echo_color "根据内存和硬盘剩余空间来生成合适的 SWAP 文件并调整优先级"
+    sudo timedatectl set-timezone Asia/Shanghai
 
-# 获取系统内存和硬盘空间信息
-MEMORY=$(free -m | grep Mem | awk '{print $2}')
-DISK_FREE=$(df / | grep / | awk '{print $4}')
+    printf "[1;34m****************************************[0m
+"
+    printf "[1;34m*     正在同步时间...                 *[0m
+"
+    printf "[1;34m****************************************[0m
+"
 
-echo_color "内存大小: ${MEMORY}MB"
-echo_color "硬盘剩余空间: ${DISK_FREE}KB"
+    sudo ntpdate cn.pool.ntp.org
 
-# 检查是否已经有 SWAP 文件
-SWAP_EXIST=$(swapon --show | grep -c ^/swapfile)
+    printf "[1;34m时间/时区已设置/校准完成，3秒后进行下一步操作[0m
+"
+    progress_bar 3
+}
 
-if [ "$SWAP_EXIST" -gt 0 ]; then
-	    echo_color "检测到已有 SWAP 文件，正在停用并删除当前 SWAP 文件..."
-	        
-	        # 停用当前的 SWAP 文件
-		    swapoff /swapfile
-		        
-		        # 永久删除当前 SWAP 文件
-			    rm -f /swapfile
-			        
-			        # 从 fstab 中删除对应的 SWAP 配置
-				    sed -i '/\/swapfile/d' /etc/fstab
-				        echo_color "当前 SWAP 文件已删除！"
-fi
+# Step 4: Configure and enable UFW
+step4_configure_ufw() {
+    printf "[1;35m****************************************[0m
+"
+    printf "[1;35m*   配置并启用 UFW...                  *[0m
+"
+    printf "[1;35m****************************************[0m
+"
 
-# 生成SWAP的大小和优先级
-SWAP_SIZE=0
-SWAP_PRIORITY=0
+    # Set up UFW rules
+    sudo ufw allow 22/tcp
+    sudo ufw allow 22/udp
+    sudo ufw allow 80/tcp
+    sudo ufw allow 80/udp
+    sudo ufw allow 443/tcp
+    sudo ufw allow 443/udp
+    sudo ufw allow 5555/tcp
+    sudo ufw allow 5555/udp
+    sudo ufw allow 8008/tcp
+    sudo ufw allow 8008/udp
+    sudo ufw allow 32767/tcp
+    sudo ufw allow 32767/udp
+    sudo ufw allow 32768/tcp
+    sudo ufw allow 32768/udp
 
-if [ "$MEMORY" -le 512 ]; then
-	    if [ "$DISK_FREE" -gt 5120 ]; then  # 5GB
-		            SWAP_SIZE=1024  # 1GB
-			            SWAP_PRIORITY=100
-				        fi
-				elif [ "$MEMORY" -le 1024 ]; then
-					    if [ "$DISK_FREE" -gt 10240 ]; then  # 10GB
-						            SWAP_SIZE=2048  # 2GB
-							            SWAP_PRIORITY=80
-								        elif [ "$DISK_FREE" -gt 5120 ]; then  # 5GB
-										        SWAP_SIZE=1024  # 1GB
-											        SWAP_PRIORITY=60
-												    fi
-											    elif [ "$MEMORY" -gt 1024 ]; then
-												        if [ "$DISK_FREE" -gt 10240 ]; then  # 10GB
-														        SWAP_SIZE=2048  # 2GB
-															        SWAP_PRIORITY=50
-																    elif [ "$DISK_FREE" -gt 5120 ]; then  # 5GB
-																	            SWAP_SIZE=1024  # 1GB
-																		            SWAP_PRIORITY=50
-																			        fi
-fi
+    sudo ufw deny from 162.142.125.0/24
+    sudo ufw deny from 167.94.138.0/24
+    sudo ufw deny from 167.94.145.0/24
+    sudo ufw deny from 167.94.146.0/24
+    sudo ufw deny from 167.248.133.0/24
+    sudo ufw deny from 199.45.154.0/24
+    sudo ufw deny from 199.45.155.0/24
+    sudo ufw deny from 206.168.34.0/24
+    sudo ufw deny from 2602:80d:1000:b0cc:e::/80
+    sudo ufw deny from 2620:96:e000:b0cc:e::/80
+    sudo ufw deny from 2602:80d:1003::/112
+    sudo ufw deny from 2602:80d:1004::/112
 
-if [ "$SWAP_SIZE" -gt 0 ]; then
-	    echo_color "正在创建 ${SWAP_SIZE}MB 的 SWAP 文件..."
-	        
-	        # 创建 SWAP 文件
-		    dd if=/dev/zero of=/swapfile bs=1M count=$SWAP_SIZE
-		        chmod 600 /swapfile
-			    mkswap /swapfile
-			        swapon /swapfile
+    sudo ufw --force enable
 
-				    # 永久启用 SWAP
-				        echo '/swapfile none swap sw 0 0' >> /etc/fstab
+    printf "[1;35m基础端口防护已部署，3秒后进行下一步操作[0m
+"
+    progress_bar 3
+}
 
-					    # 调整 SWAP 优先级
-					        swapon -p $SWAP_PRIORITY /swapfile
+# Step 5: Finish and exit
+step5_finish() {
+    printf "[1;32m****************************************[0m
+"
+    printf "[1;32m*       全部操作已完成！               *[0m
+"
+    printf "[1;32m*       脚本将自动退出...             *[0m
+"
+    printf "[1;32m****************************************[0m
+"
+    progress_bar 3
+    exit 0
+}
 
-						    echo_color "SWAP 文件已创建并启用，优先级为 ${SWAP_PRIORITY}！"
-					    else
-						        echo_color "内存和硬盘空间不足以创建 SWAP 文件。"
-		    fi
-
-		    # 结束
-		    echo_color "所有操作已完成！"
-
+# Main execution
+step1_install_dependencies
+step2_update_system
+step3_set_timezone_and_sync_time
+step4_configure_ufw
+step5_finish
