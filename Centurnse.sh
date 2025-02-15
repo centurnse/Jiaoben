@@ -37,11 +37,12 @@ step1_install_dependencies() {
     case $DISTRO in
         ubuntu|debian)
             sudo apt update || { echo "更新失败，清理 apt 缓存并重试"; sudo apt-get clean; sudo apt-get update; }
-            sudo apt install -y wget curl vim mtr ufw ntpdate sudo unzip
+            sudo apt install -y wget curl vim mtr ufw ntpdate sudo unzip lvm2
             ;;
         centos|rocky|almalinux)
             sudo yum clean all
             sudo yum update -y || { echo "更新失败，清理 yum 缓存并重试"; sudo yum clean all; sudo yum update -y; }
+            sudo yum install -y lvm2
             ;;
         *)
             echo -e "\033[1;31m不支持的 Linux 发行版：$DISTRO\033[0m"
@@ -133,7 +134,7 @@ step4_configure_ufw() {
     progress_bar 3
 }
 
-# Step 5: Manage SWAP (newly added step)
+# Step 5: Manage SWAP
 step5_manage_swap() {
     echo -e "\033[1;36m****************************************\033[0m"
     echo -e "\033[1;36m*   管理并配置 SWAP 文件...            *\033[0m"
@@ -190,20 +191,50 @@ EOF
         done
     }
 
+    delete_lvm_swap() {
+        if lvscan | grep -q 'active'; then
+            echo "删除 LVM 交换空间..."
+            sudo lvremove -f $(lvscan | grep 'active' | awk '{print $1}')
+        else
+            echo "未检测到 LVM 类型的 SWAP。"
+        fi
+    }
+
     create_swap_file() {
         ram_size=$(free -g | awk '/^Mem:/{print $2}')
         available_disk_size=$(df / --output=avail -h | tail -n 1 | awk '{print $1}')
         available_disk_size_num=$(echo $available_disk_size | sed 's/[^0-9]*//g')
 
-        if [[ $ram_size -ge 1 || $available_disk_size_num -gt 5 ]]; then
-            echo "根据条件创建新的 SWAP 文件"
+        if [[ $ram_size -lt 1 && $available_disk_size_num -ge 5 ]]; then
+            echo "创建 1G 的 SWAP 文件"
             sudo dd if=/dev/zero of=/swapfile bs=1M count=1024 status=progress
             sudo chmod 600 /swapfile
             sudo mkswap /swapfile
             sudo swapon /swapfile
             echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
-        else
-            echo "内存和磁盘空间不足，不创建 SWAP 文件。"
+        elif [[ $ram_size -lt 1 && $available_disk_size_num -lt 5 ]]; then
+            echo "创建 512MB 的 SWAP 文件"
+            sudo dd if=/dev/zero of=/swapfile bs=1M count=512 status=progress
+            sudo chmod 600 /swapfile
+            sudo mkswap /swapfile
+            sudo swapon /swapfile
+            echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
+        elif [[ $ram_size -ge 1 && $ram_size -lt 2 && $available_disk_size_num -gt 10 && $available_disk_size_num -lt 40 ]]; then
+            echo "创建 2G 的 SWAP 文件"
+            sudo dd if=/dev/zero of=/swapfile bs=1M count=2048 status=progress
+            sudo chmod 600 /swapfile
+            sudo mkswap /swapfile
+            sudo swapon /swapfile
+            echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
+        elif [[ $ram_size -gt 2 && $ram_size -lt 6 && $available_disk_size_num -gt 20 && $available_disk_size_num -lt 300 ]]; then
+            echo "创建 4G 的 SWAP 文件"
+            sudo dd if=/dev/zero of=/swapfile bs=1M count=4096 status=progress
+            sudo chmod 600 /swapfile
+            sudo mkswap /swapfile
+            sudo swapon /swapfile
+            echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
+        elif [[ $ram_size -ge 6 ]]; then
+            echo "RAM 大于等于 6G，不创建 SWAP 文件。"
         fi
     }
 
@@ -212,6 +243,7 @@ EOF
     disable_swap
     delete_swap_file
     delete_swap_partition
+    delete_lvm_swap
     update_fstab
     create_swap_file
 
