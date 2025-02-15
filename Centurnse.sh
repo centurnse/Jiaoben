@@ -3,7 +3,7 @@
 # Function to display a progress bar for countdown
 progress_bar() {
     local duration=$1
-    local bar_length=30 # Adjust the length of the progress bar
+    local bar_length=30
     for ((i=0; i<=duration; i++)); do
         local filled=$((i * bar_length / duration))
         printf "\r["
@@ -36,12 +36,12 @@ step1_install_dependencies() {
 
     case $DISTRO in
         ubuntu|debian)
-            sudo apt update
+            sudo apt update || { echo "更新失败，清理 apt 缓存并重试"; sudo apt-get clean; sudo apt-get update; }
             sudo apt install -y wget curl vim mtr ufw ntpdate sudo unzip
             ;;
         centos|rocky|almalinux)
-            sudo yum install -y epel-release
-            sudo yum install -y wget curl vim mtr ufw ntpdate sudo unzip
+            sudo yum clean all
+            sudo yum update -y || { echo "更新失败，清理 yum 缓存并重试"; sudo yum clean all; sudo yum update -y; }
             ;;
         *)
             echo -e "\033[1;31m不支持的 Linux 发行版：$DISTRO\033[0m"
@@ -132,9 +132,114 @@ step4_configure_ufw() {
     echo -e "\033[1;35m基础端口防护已部署，3秒后进行下一步操作\033[0m"
     progress_bar 3
 }
+# Step 5: Manage SWAP (newly added step)
+step5_manage_swap() {
+    echo -e "\033[1;36m****************************************\033[0m"
+    echo -e "\033[1;36m*   管理并配置 SWAP 文件...            *\033[0m"
+    echo -e "\033[1;36m****************************************\033[0m"
 
-# Step 5: Finish and exit
-step5_finish() {
+    # Swap management script
+    install_lvm_tools() {
+        if ! command -v lvscan &> /dev/null; then
+            echo "LVM 工具未安装，正在安装 lvm2..."
+            sudo apt-get update
+            sudo apt-get install -y lvm2
+        else
+            echo "LVM 工具已安装。"
+        fi
+    }
+
+    disable_swap() {
+        swapon --show
+        if [[ -z "$(swapon --show)" ]]; then
+            echo "没有启用的 SWAP。"
+            return 0
+        fi
+        for swap_device in $(swapon --show=NAME --noheadings); do
+            echo "禁用 SWAP 设备: $swap_device"
+            sudo swapoff "$swap_device"
+        done
+    }
+
+    delete_swap_file() {
+        if [[ -f /swapfile ]]; then
+            echo "删除 SWAP 文件 /swapfile"
+            sudo rm -f /swapfile
+        else
+            echo "未发现文件类型的 SWAP (/swapfile)。"
+        fi
+    }
+
+    update_fstab() {
+        echo "更新 /etc/fstab 文件，移除 SWAP 配置..."
+        sudo sed -i '/swap/d' /etc/fstab
+    }
+
+    delete_swap_partition() {
+        for swap_device in $(lsblk -o NAME,TYPE,SIZE | grep 'swap' | awk '{print $1}'); do
+            if [[ -n "$swap_device" ]]; then
+                echo "删除 SWAP 分区: /dev/$swap_device"
+                sudo swapoff "/dev/$swap_device"
+                sudo fdisk /dev/$(echo $swap_device | cut -d 'p' -f 1) <<EOF
+d
+$(echo $swap_device | sed 's/[^0-9]*//g')
+w
+EOF
+            fi
+        done
+    }
+
+    create_swap_file() {
+        ram_size=$(free -g | awk '/^Mem:/{print $2}')
+        available_disk_size=$(df / --output=avail -h | tail -n 1 | awk '{print $1}')
+        available_disk_size_num=$(echo $available_disk_size | sed 's/[^0-9]*//g')
+
+        if [[ $ram_size -lt 1 && $available_disk_size_num -ge 5 ]]; then
+            echo "创建 1G 的 SWAP 文件"
+            sudo dd if=/dev/zero of=/swapfile bs=1M count=1024 status=progress
+            sudo chmod 600 /swapfile
+            sudo mkswap /swapfile
+            sudo swapon /swapfile
+            echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
+        elif [[ $ram_size -lt 1 && $available_disk_size_num -lt 5 ]]; then
+            echo "创建 512MB 的 SWAP 文件"
+            sudo dd if=/dev/zero of=/swapfile bs=1M count=512 status=progress
+            sudo chmod 600 /swapfile
+            sudo mkswap /swapfile
+            sudo swapon /swapfile
+            echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
+        elif [[ $ram_size -ge 1 && $ram_size -lt 2 && $available_disk_size_num -gt 10 && $available_disk_size_num -lt 40 ]]; then
+            echo "创建 2G 的 SWAP 文件"
+            sudo dd if=/dev/zero of=/swapfile bs=1M count=2048 status=progress
+            sudo chmod 600 /swapfile
+            sudo mkswap /swapfile
+            sudo swapon /swapfile
+            echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
+        elif [[ $ram_size -gt 2 && $ram_size -lt 6 && $available_disk_size_num -gt 20 && $available_disk_size_num -lt 300 ]]; then
+            echo "创建 4G 的 SWAP 文件"
+            sudo dd if=/dev/zero of=/swapfile bs=1M count=4096 status=progress
+            sudo chmod 600 /swapfile
+            sudo mkswap /swapfile
+            sudo swapon /swapfile
+            echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
+        elif [[ $ram_size -ge 6 ]]; then
+            echo "RAM 大于等于 6G，不创建 SWAP 文件。"
+        fi
+    }
+
+    # Main swap management function
+    install_lvm_tools
+    disable_swap
+    delete_swap_file
+    delete_swap_partition
+    update_fstab
+    create_swap_file
+
+    echo -e "\033[1;36mSWAP 删除操作完成，且根据条件创建了新的 SWAP（如适用）。\033[0m"
+    progress_bar 3
+}
+# Step 6: Finish and exit
+step6_finish() {
     echo -e "\033[1;32m****************************************\033[0m"
     echo -e "\033[1;32m*       全部操作已完成！               *\033[0m"
     echo -e "\033[1;32m*       脚本将自动退出...             *\033[0m"
@@ -148,4 +253,5 @@ step1_install_dependencies
 step2_update_system
 step3_set_timezone_and_sync_time
 step4_configure_ufw
-step5_finish
+step5_manage_swap
+step6_finish
