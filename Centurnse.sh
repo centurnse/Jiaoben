@@ -132,6 +132,7 @@ step4_configure_ufw() {
     echo -e "\033[1;35m基础端口防护已部署，3秒后进行下一步操作\033[0m"
     progress_bar 3
 }
+
 # Step 5: Manage SWAP (newly added step)
 step5_manage_swap() {
     echo -e "\033[1;36m****************************************\033[0m"
@@ -194,36 +195,15 @@ EOF
         available_disk_size=$(df / --output=avail -h | tail -n 1 | awk '{print $1}')
         available_disk_size_num=$(echo $available_disk_size | sed 's/[^0-9]*//g')
 
-        if [[ $ram_size -lt 1 && $available_disk_size_num -ge 5 ]]; then
-            echo "创建 1G 的 SWAP 文件"
+        if [[ $ram_size -ge 1 || $available_disk_size_num -gt 5 ]]; then
+            echo "根据条件创建新的 SWAP 文件"
             sudo dd if=/dev/zero of=/swapfile bs=1M count=1024 status=progress
             sudo chmod 600 /swapfile
             sudo mkswap /swapfile
             sudo swapon /swapfile
             echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
-        elif [[ $ram_size -lt 1 && $available_disk_size_num -lt 5 ]]; then
-            echo "创建 512MB 的 SWAP 文件"
-            sudo dd if=/dev/zero of=/swapfile bs=1M count=512 status=progress
-            sudo chmod 600 /swapfile
-            sudo mkswap /swapfile
-            sudo swapon /swapfile
-            echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
-        elif [[ $ram_size -ge 1 && $ram_size -lt 2 && $available_disk_size_num -gt 10 && $available_disk_size_num -lt 40 ]]; then
-            echo "创建 2G 的 SWAP 文件"
-            sudo dd if=/dev/zero of=/swapfile bs=1M count=2048 status=progress
-            sudo chmod 600 /swapfile
-            sudo mkswap /swapfile
-            sudo swapon /swapfile
-            echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
-        elif [[ $ram_size -gt 2 && $ram_size -lt 6 && $available_disk_size_num -gt 20 && $available_disk_size_num -lt 300 ]]; then
-            echo "创建 4G 的 SWAP 文件"
-            sudo dd if=/dev/zero of=/swapfile bs=1M count=4096 status=progress
-            sudo chmod 600 /swapfile
-            sudo mkswap /swapfile
-            sudo swapon /swapfile
-            echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
-        elif [[ $ram_size -ge 6 ]]; then
-            echo "RAM 大于等于 6G，不创建 SWAP 文件。"
+        else
+            echo "内存和磁盘空间不足，不创建 SWAP 文件。"
         fi
     }
 
@@ -238,6 +218,7 @@ EOF
     echo -e "\033[1;36mSWAP 删除操作完成，且根据条件创建了新的 SWAP（如适用）。\033[0m"
     progress_bar 3
 }
+
 # Step 6: Finish and exit
 step6_finish() {
     echo -e "\033[1;32m****************************************\033[0m"
