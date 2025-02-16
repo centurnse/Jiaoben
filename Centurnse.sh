@@ -164,21 +164,35 @@ setup_ssh() {
   sed -i '/^#*ChallengeResponseAuthentication/c\ChallengeResponseAuthentication no' /etc/ssh/sshd_config
   sed -i '/^#*UsePAM/c\UsePAM no' /etc/ssh/sshd_config
 
-  # Ubuntu 24特殊处理
+  # Ubuntu 24+专项处理
   if [[ -f /etc/os-release ]]; then
     source /etc/os-release
-    if [[ "$ID" == "ubuntu" && "$VERSION_ID" == "24.04" ]]; then
-      if grep -q '^Include /etc/ssh/sshd_config.d/*.conf' /etc/ssh/sshd_config; then
-        for conf_file in /etc/ssh/sshd_config.d/*.conf; do
-          [[ -f "$conf_file" ]] || continue
-          sed -i '/^#*PasswordAuthentication/c\PasswordAuthentication no' "$conf_file"
-          sed -i '/^#*PubkeyAuthentication/c\PubkeyAuthentication yes' "$conf_file"
+    if [[ "$ID" == "ubuntu" && "$VERSION_ID" =~ ^24 ]]; then
+      info "检测到Ubuntu 24+系统，处理SSH子配置文件..."
+      
+      # 检查配置文件目录是否存在
+      if [[ -d /etc/ssh/sshd_config.d ]]; then
+        # 处理所有.conf文件
+        find /etc/ssh/sshd_config.d/ -name '*.conf' | while read -r conf_file; do
+          info "处理配置文件: $conf_file"
+          # 移除已有配置并添加新配置
+          grep -v '^#*PasswordAuthentication' "$conf_file" > "${conf_file}.tmp"
+          echo "PasswordAuthentication no" >> "${conf_file}.tmp"
+          mv "${conf_file}.tmp" "$conf_file"
+          
+          # 确保配置正确性
+          sed -i '/^PasswordAuthentication/c\PasswordAuthentication no' "$conf_file"
+          sed -i '/^PubkeyAuthentication/c\PubkeyAuthentication yes' "$conf_file"
         done
+        
+        # 强制重启SSH服务
+        info "重启SSH服务..."
+        systemctl restart ssh
       fi
     fi
   fi
 
-  # 兼容服务重启
+  # 通用服务重启
   if systemctl is-active ssh &> /dev/null; then
     systemctl restart ssh
   elif systemctl is-active sshd &> /dev/null; then
@@ -189,7 +203,7 @@ setup_ssh() {
   success "SSH配置完成（已强制禁用密码登录）"
 }
 
-# 主执行流程
+# 主执行流程（其他函数保持不变）
 main() {
   update_system
   install_packages
@@ -199,7 +213,10 @@ main() {
   setup_cleanup
   setup_ssh
   echo -e "\n\033[32m所有任务已完成！\033[0m"
-  echo -e "\033[33m[重要] 请确认已保存私钥，否则将无法登录服务器！\033[0m"
+  echo -e "\033[33m[重要] 请立即测试SSH连接！\033[0m"
 }
+
+# 以下其他函数与之前版本保持一致，此处省略以节省篇幅
+# update_system(), install_packages() 等函数保持不变...
 
 main
