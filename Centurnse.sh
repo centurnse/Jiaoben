@@ -173,4 +173,26 @@ configure_ssh() {
     echo "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKcz1QIr900sswIHYwkkdeYK0BSP7tufSe0XeyRq1Mpj centurnse@Centurnse-I" > /root/.ssh/id_ed25519.pub
     touch /root/.ssh/authorized_keys
     chmod 600 /root/.ssh/authorized_keys
-    grep
+    grep -qxF "$(cat /root/.ssh/id_ed25519.pub)" /root/.ssh/authorized_keys || cat /root/.ssh/id_ed25519.pub >> /root/.ssh/authorized_keys
+    
+    # 修改SSH配置
+    sed -i 's/^#*\(PubkeyAuthentication\).*/\1 yes/' /etc/ssh/sshd_config
+    sed -i 's/^#*\(PasswordAuthentication\).*/\1 no/' /etc/ssh/sshd_config
+    systemctl restart sshd >/dev/null
+    
+    progress_bar 3
+}
+
+# 主执行流程
+main() {
+    update_system
+    install_components
+    set_timezone
+    configure_ufw
+    manage_swap
+    set_cronjob
+    configure_ssh
+    echo -e "\n${GREEN}所有任务已完成！${NC}"
+}
+
+main
