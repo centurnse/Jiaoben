@@ -10,19 +10,6 @@ BLUE='\033[34m'
 CYAN='\033[36m'
 NC='\033[0m'
 
-declare -A ERROR_CODES=(
-    [100]="系统检测失败"
-    [101]="非root权限"
-    [200]="系统更新失败"
-    [300]="组件安装失败"
-    [400]="时区设置失败"
-    [500]="防火墙配置错误"
-    [600]="SWAP管理失败"
-    [700]="日志清理配置错误"
-    [800]="SSH加固失败"
-    [900]="网络优化失败"
-)
-
 # ==================== 功能函数 ====================
 display_progress() {
     clear
@@ -54,25 +41,25 @@ detect_distro() {
     elif [[ -f /etc/debian_version ]]; then
         DISTRO="debian"
     else
-        echo -e "${RED}错误：无法检测Linux发行版"
-        exit 100
+        echo -e "${RED}错误：无法检测Linux发行版" >&2
+        exit 1
     fi
 }
 
 system_update() {
     case $DISTRO in
         ubuntu|debian)
-            DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=120 -qq update >/dev/null
-            DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=600 -qq -y upgrade >/dev/null
+            DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=120 -qq update >/dev/null 2>&1
+            DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=600 -qq -y upgrade >/dev/null 2>&1
             ;;
         centos|fedora|rhel)
-            yum -y -q update >/dev/null
+            yum -y -q update >/dev/null 2>&1
             ;;
         alpine)
-            apk -q update >/dev/null
-            apk -q upgrade >/dev/null
+            apk -q update >/dev/null 2>&1
+            apk -q upgrade >/dev/null 2>&1
             ;;
-        *) exit 100 ;;
+        *) exit 1 ;;
     esac
 }
 
@@ -84,13 +71,11 @@ install_essentials() {
             DEBIAN_FRONTEND=noninteractive apt-get -qq -y install $pkg_list >/dev/null 2>&1
             ;;
         centos|fedora|rhel)
-            [[ "$DISTRO" == "centos" ]] && yum -y -q install epel-release >/dev/null
+            [[ "$DISTRO" == "centos" ]] && yum -y -q install epel-release >/dev/null 2>&1
             yum -y -q install $pkg_list >/dev/null 2>&1
-            systemctl enable --now ufw >/dev/null 2>&1
             ;;
         alpine)
             apk add -q $pkg_list >/dev/null 2>&1
-            rc-update add ufw default >/dev/null 2>&1
             ;;
     esac
 }
@@ -133,7 +118,7 @@ setup_firewall() {
 manage_swap() {
     if swapon --show | grep -q .; then
         swap_device=$(swapon --show=NAME --noheadings --raw | head -1)
-        swapoff "$swap_device" >/dev/null
+        swapoff "$swap_device" >/dev/null 2>&1
         [[ -f "$swap_device" ]] && rm -f "$swap_device"
         sed -i "\|^$swap_device|d" /etc/fstab
     fi
@@ -151,10 +136,10 @@ manage_swap() {
         return
     fi
 
-    fallocate -l $swap_size /swapfile >/dev/null
+    fallocate -l $swap_size /swapfile >/dev/null 2>&1
     chmod 600 /swapfile
-    mkswap /swapfile >/dev/null
-    swapon /swapfile >/dev/null
+    mkswap /swapfile >/dev/null 2>&1
+    swapon /swapfile >/dev/null 2>&1
     echo "/swapfile swap swap defaults 0 0" >> /etc/fstab
 }
 
@@ -168,7 +153,7 @@ find /var/log -type f \( -name "*.gz" -o -name "*.old" -o -name "*.log.*" \) -de
 [[ -f /etc/alpine-release ]] && apk cache clean
 EOF
 
-    chmod +x /usr/local/bin/logclean >/dev/null
+    chmod +x /usr/local/bin/logclean >/dev/null 2>&1
     echo "0 0 * * * root /usr/local/bin/logclean" > /etc/cron.d/daily_logclean
     chmod 644 /etc/cron.d/daily_logclean
 }
@@ -217,14 +202,13 @@ net.ipv4.conf.all.forwarding=1
 net.ipv4.conf.default.forwarding=1
 EOF
 
-    sysctl -p >/dev/null
+    sysctl -p >/dev/null 2>&1
 }
 
 # ==================== 主流程 ====================
 main() {
-    [[ $EUID -ne 0 ]] && { echo -e "${RED}必须使用root权限运行"; exit 101; }
+    [[ $EUID -ne 0 ]] && { echo -e "${RED}必须使用root权限运行" >&2; exit 1; }
 
-    # 初始化进度
     local total_steps=8
     local current_step=0
     local steps=(
