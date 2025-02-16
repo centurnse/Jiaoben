@@ -36,7 +36,8 @@ system_update() {
     if [ -f /etc/debian_version ]; then
         echo -e "${GREEN}检测到 Debian/Ubuntu 系统${NC}"
         apt-get -qq update > /dev/null
-        DEBIAN_FRONTEND=noninteractive apt-get -qq -y upgrade > /dev/null
+        DEBIAN_FRONTEND=noninteractive apt-get -qq -y --with-new-pkgs upgrade > /dev/null
+        DEBIAN_FRONTEND=noninteractive apt-get -qq -y autoremove > /dev/null
         echo -e "${GREEN}系统更新完成${NC}"
     elif [ -f /etc/redhat-release ]; then
         echo -e "${GREEN}检测到 RHEL/CentOS 系统${NC}"
@@ -59,7 +60,7 @@ system_update() {
 # 组件安装函数
 install_components() {
     trap 'error_handler "组件安装"' ERR
-    components=("wget" "curl" "vim" "mtr" "ufw" "ntpdate" "sudo" "unzip" "lvm2")
+    components=("wget" "curl" "vim" "mtr" "ufw" "ntpdate" "sudo" "unzip" "lvm2" "systemd")
     
     if [ -f /etc/debian_version ]; then
         for pkg in "${components[@]}"; do
@@ -80,12 +81,42 @@ install_components() {
     countdown
 }
 
-# 时间设置函数
+# 时间设置函数（修复版）
 time_config() {
     trap 'error_handler "时间设置"' ERR
-    timedatectl set-timezone Asia/Shanghai > /dev/null 2>&1 || true
+    
+    # 设置时区
+    timedatectl set-timezone Asia/Shanghai > /dev/null 2>&1 || {
+        ln -fs /usr/share/zoneinfo/Asia/Shanghai /etc/localtime
+        dpkg-reconfigure -f noninteractive tzdata > /dev/null 2>&1
+    }
+    
+    # 安装并配置NTP
+    if ! command -v ntpd &> /dev/null; then
+        DEBIAN_FRONTEND=noninteractive apt-get -qq -y install ntp > /dev/null
+    fi
+    
+    # 停止并禁用systemd-timesyncd
+    systemctl stop systemd-timesyncd > /dev/null 2>&1 || true
+    systemctl disable systemd-timesyncd > /dev/null 2>&1 || true
+    
+    # 配置NTP服务
+    cat > /etc/ntp.conf <<EOF
+server 0.asia.pool.ntp.org
+server 1.asia.pool.ntp.org
+server 2.asia.pool.ntp.org
+server 3.asia.pool.ntp.org
+EOF
+    
+    # 启动并启用NTP服务
+    systemctl enable ntp > /dev/null 2>&1
+    systemctl restart ntp > /dev/null 2>&1
+    
+    # 强制同步时间
     ntpdate -u pool.ntp.org > /dev/null
-    (crontab -l 2>/dev/null | grep -v "ntpdate"; echo "0 * * * * /usr/sbin/ntpdate pool.ntp.org > /dev/null 2>&1") | crontab -
+    
+    # 添加定时任务
+    (crontab -l 2>/dev/null | grep -v "ntpdate"; echo "0 * * * * /usr/sbin/ntpdate -u pool.ntp.org > /dev/null 2>&1") | crontab -
     
     echo -e "${GREEN}时区设置和时间同步完成${NC}"
     SUCCESS_LIST+=("时区设置和时间同步完成")
