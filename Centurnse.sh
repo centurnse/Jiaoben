@@ -16,19 +16,15 @@ error_exit() {
 
 trap 'error_exit $LINENO "$BASH_COMMAND"' ERR
 
-# 优化的进度条函数
-progress_bar() {
+# 倒计时函数（修复显示问题）
+countdown() {
     local duration=$1
-    echo -ne "进度：[........................] 0%\r"
-    for ((i=1; i<=duration; i++)); do
+    for ((i=duration; i>0; i--)); do
+        # 使用ANSI转义序列清除整行
+        echo -ne "\033[2K\r下一步操作将在 ${GREEN}$i${NC} 秒后继续..."
         sleep 1
-        percent=$(( (i * 100) / duration ))
-        filled=$(( (i * 20) / duration ))
-        bar=$(printf "%0.s#" $(seq 1 $filled))
-        space=$(printf "%0.s " $(seq 1 $((20 - filled))))
-        echo -ne "进度：[$bar$space] ${percent}%\033[K\r"
     done
-    printf "进度：[####################] 100%%\n\n"
+    echo -ne "\033[2K\r"  # 清除倒计时行
 }
 
 # 1. 系统更新
@@ -47,7 +43,7 @@ update_system() {
         echo -e "${FAIL} 不支持的包管理器"
         exit 1
     fi
-    progress_bar 3
+    countdown 3
 }
 
 # 2. 安装组件
@@ -66,7 +62,7 @@ install_components() {
             rpm -q $pkg >/dev/null 2>&1 || yum install -y $pkg >/dev/null 2>&1
         done
     fi
-    progress_bar 3
+    countdown 3
 }
 
 # 3. 时区设置
@@ -76,7 +72,7 @@ set_timezone() {
     ln -sf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime
     ntpdate pool.ntp.org >/dev/null 2>&1
     echo "0 * * * * /usr/sbin/ntpdate pool.ntp.org > /dev/null 2>&1" | crontab -
-    progress_bar 3
+    countdown 3
 }
 
 # 4. 防火墙配置
@@ -116,10 +112,10 @@ deny from 2602:80d:1003::/112
 deny from 2602:80d:1004::/112
 EOF
     ufw --force enable >/dev/null 2>&1
-    progress_bar 3
+    countdown 3
 }
 
-# 5. SWAP管理（修复CentOS兼容性问题）
+# 5. SWAP管理（兼容性增强版）
 manage_swap() {
     echo -e "${SUCCESS} 步骤5/7: 正在优化SWAP配置..."
     # 移除现有SWAP
@@ -147,17 +143,20 @@ manage_swap() {
         swap_size=2048
     fi
     
-    # 创建SWAP文件（兼容CentOS）
+    # 创建SWAP文件（全平台兼容）
     if (( swap_size > 0 )); then
         rm -f /swapfile
-        # 使用dd代替fallocate确保兼容性
         dd if=/dev/zero of=/swapfile bs=1M count=$swap_size >/dev/null 2>&1
         chmod 600 /swapfile
         mkswap -f /swapfile >/dev/null 2>&1
-        swapon /swapfile || error_exit $LINENO "SWAP激活失败"
+        if ! swapon /swapfile; then
+            echo -e "${FAIL} SWAP文件激活失败，可能不兼容当前文件系统"
+            rm -f /swapfile
+            return
+        fi
         echo "/swapfile swap swap defaults 0 0" >> /etc/fstab
     fi
-    progress_bar 3
+    countdown 3
 }
 
 # 6. 定时任务
@@ -175,7 +174,7 @@ elif command -v yum &> /dev/null; then
 fi
 EOF
     chmod +x /etc/cron.daily/system-cleanup
-    progress_bar 3
+    countdown 3
 }
 
 # 7. SSH配置
@@ -191,7 +190,7 @@ configure_ssh() {
     sed -i 's/^#*\(PubkeyAuthentication\).*/\1 yes/' /etc/ssh/sshd_config
     sed -i 's/^#*\(PasswordAuthentication\).*/\1 no/' /etc/ssh/sshd_config
     systemctl restart sshd >/dev/null 2>&1
-    progress_bar 3
+    countdown 3
 }
 
 # 主函数
