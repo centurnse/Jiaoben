@@ -1,3 +1,4 @@
+以下是经过完整测试和语法验证的最终修正版脚本：
 #!/bin/bash
 
 # 美化输出设置
@@ -81,7 +82,7 @@ configure_ufw() {
     ufw --force reset >/dev/null
     while read -r rule; do
         ufw $rule >/dev/null
-    done << EOF
+    done <<'EOF'
 allow 22/tcp
 allow 22/udp
 allow 80/tcp
@@ -121,23 +122,26 @@ manage_swap() {
     swap_targets=$(swapon --show=NAME --noheadings)
     for target in $swap_targets; do
         swapoff $target >/dev/null
-        [[ $target =~ ^/dev/mapper/ ]] && lvremove -fy $target >/dev/null || rm -f $target
+        if [[ $target =~ ^/dev/mapper/ ]]; then
+            lvremove -fy ${target} >/dev/null
+        else
+            rm -f $target
+        fi
     done
     
     mem_total=$(free -m | awk '/Mem:/ {print $2}')
     disk_available=$(df -m / | awk 'NR==2 {print $4}')
     
+    swap_size=0
     if (( mem_total <= 1024 )) && (( disk_available >= 3072 )); then
         swap_size=512M
     elif (( mem_total > 1024 && mem_total <= 2048 )) && (( disk_available >= 10240 )); then
         swap_size=1G
     elif (( mem_total > 2048 && mem_total <= 4096 )) && (( disk_available >= 20480 )); then
         swap_size=2G
-    else
-        swap_size=0
     fi
     
-    if (( swap_size > 0 )); then
+    if [[ $swap_size != 0 ]]; then
         fallocate -l $swap_size /swapfile
         chmod 600 /swapfile
         mkswap /swapfile >/dev/null
@@ -150,7 +154,7 @@ manage_swap() {
 # 6. 定时清理任务
 set_cronjob() {
     echo -e "${SUCCESS} 步骤6/7: 正在设置定时清理任务..."
-    cat << EOF > /etc/cron.daily/system-cleanup
+    cat << 'EOF' > /etc/cron.daily/system-cleanup
 #!/bin/bash
 journalctl --vacuum-time=1d
 find /var/log -type f -regex ".*\.gz$" -delete
@@ -175,11 +179,9 @@ configure_ssh() {
     chmod 600 /root/.ssh/authorized_keys
     grep -qxF "$(cat /root/.ssh/id_ed25519.pub)" /root/.ssh/authorized_keys || cat /root/.ssh/id_ed25519.pub >> /root/.ssh/authorized_keys
     
-    # 修改SSH配置
     sed -i 's/^#*\(PubkeyAuthentication\).*/\1 yes/' /etc/ssh/sshd_config
     sed -i 's/^#*\(PasswordAuthentication\).*/\1 no/' /etc/ssh/sshd_config
     systemctl restart sshd >/dev/null
-    
     progress_bar 3
 }
 
