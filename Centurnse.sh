@@ -1,4 +1,3 @@
-以下是经过完整测试和语法验证的最终修正版脚本：
 #!/bin/bash
 
 # 美化输出设置
@@ -17,11 +16,11 @@ error_exit() {
 
 trap 'error_exit $LINENO "$BASH_COMMAND"' ERR
 
-# 进度条函数
+# 优化后的进度条函数
 progress_bar() {
     local duration=$1
     echo -ne "进度：[........................] 0%\r"
-    for ((i=0; i<=duration; i++)); do
+    for ((i=1; i<=duration; i++)); do
         sleep 1
         percent=$(( (i * 100) / duration ))
         filled=$(( (i * 20) / duration ))
@@ -29,20 +28,22 @@ progress_bar() {
         space=$(printf "%0.s " $(seq 1 $((20 - filled))))
         echo -ne "进度：[$bar$space] $percent%\r"
     done
+    echo -ne "进度：[####################] 100%"
     echo -e "\n"
 }
 
-# 1. 系统更新
+# 1. 系统更新（已修复apt警告）
 update_system() {
     echo -e "\n${SUCCESS} 步骤1/7: 正在更新系统..."
     if command -v apt &> /dev/null; then
-        apt update -y > /dev/null && apt upgrade -y > /dev/null
+        apt -qq update -y > /dev/null 2>&1 
+        DEBIAN_FRONTEND=noninteractive apt -qq upgrade -y > /dev/null 2>&1
     elif command -v yum &> /dev/null; then
-        yum update -y > /dev/null
+        yum update -y > /dev/null 2>&1
     elif command -v apk &> /dev/null; then
-        apk update > /dev/null && apk upgrade > /dev/null
+        apk update > /dev/null 2>&1 && apk upgrade > /dev/null 2>&1
     elif command -v pacman &> /dev/null; then
-        pacman -Syu --noconfirm > /dev/null
+        pacman -Syu --noconfirm > /dev/null 2>&1
     else
         echo -e "${FAIL} 不支持的包管理器"
         exit 1
@@ -50,18 +51,20 @@ update_system() {
     progress_bar 3
 }
 
-# 2. 安装组件
+# 2. 安装组件（已优化输出）
 install_components() {
     echo -e "${SUCCESS} 步骤2/7: 正在安装必要组件..."
     packages=(wget curl vim mtr ufw ntpdate sudo unzip lvm2)
     
     if command -v apt &> /dev/null; then
         for pkg in "${packages[@]}"; do
-            dpkg -s $pkg >/dev/null 2>&1 || apt install -y $pkg >/dev/null
+            if ! dpkg -s $pkg >/dev/null 2>&1; then
+                DEBIAN_FRONTEND=noninteractive apt install -yqq $pkg >/dev/null 2>&1
+            fi
         done
     elif command -v yum &> /dev/null; then
         for pkg in "${packages[@]}"; do
-            rpm -q $pkg >/dev/null 2>&1 || yum install -y $pkg >/dev/null
+            rpm -q $pkg >/dev/null 2>&1 || yum install -y $pkg >/dev/null 2>&1
         done
     fi
     progress_bar 3
