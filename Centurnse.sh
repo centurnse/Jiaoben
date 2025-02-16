@@ -16,7 +16,7 @@ error_exit() {
 
 trap 'error_exit $LINENO "$BASH_COMMAND"' ERR
 
-# 优化的进度条函数
+# 完全修正的进度条函数
 progress_bar() {
     local duration=$1
     echo -ne "进度：[........................] 0%\r"
@@ -26,13 +26,14 @@ progress_bar() {
         filled=$(( (i * 20) / duration ))
         bar=$(printf "%0.s#" $(seq 1 $filled))
         space=$(printf "%0.s " $(seq 1 $((20 - filled))))
-        echo -ne "进度：[$bar$space] $percent%\r"
+        # 使用ANSI转义序列清除到行尾
+        echo -ne "进度：[$bar$space] $percent%\033[K\r"
     done
-    echo -ne "进度：[####################] 100%"
-    echo -e "\n"
+    # 最终显示使用printf确保格式正确
+    printf "进度：[####################] 100%%\n\n"
 }
 
-# 1. 系统更新（静默模式）
+# 1. 系统更新
 update_system() {
     echo -e "\n${SUCCESS} 步骤1/7: 正在更新系统..."
     if command -v apt &> /dev/null; then
@@ -51,7 +52,7 @@ update_system() {
     progress_bar 3
 }
 
-# 2. 静默安装组件
+# 2. 安装组件
 install_components() {
     echo -e "${SUCCESS} 步骤2/7: 正在安装必要组件..."
     packages=(wget curl vim mtr ufw ntpdate sudo unzip lvm2)
@@ -70,7 +71,7 @@ install_components() {
     progress_bar 3
 }
 
-# 3. 时区配置
+# 3. 时区设置
 set_timezone() {
     echo -e "${SUCCESS} 步骤3/7: 正在设置时区..."
     timedatectl set-timezone Asia/Shanghai >/dev/null
@@ -79,7 +80,7 @@ set_timezone() {
     progress_bar 3
 }
 
-# 4. 防火墙配置（修复EOF问题）
+# 4. 防火墙配置
 configure_ufw() {
     echo -e "${SUCCESS} 步骤4/7: 正在配置防火墙..."
     ufw --force reset >/dev/null 2>&1
@@ -119,7 +120,7 @@ EOF
     progress_bar 3
 }
 
-# 5. SWAP管理（增强兼容性）
+# 5. SWAP管理
 manage_swap() {
     echo -e "${SUCCESS} 步骤5/7: 正在优化SWAP配置..."
     swap_targets=$(swapon --show=NAME --noheadings 2>/dev/null)
@@ -154,7 +155,7 @@ manage_swap() {
     progress_bar 3
 }
 
-# 6. 日志清理任务（修复EOF）
+# 6. 定时任务
 set_cronjob() {
     echo -e "${SUCCESS} 步骤6/7: 正在设置定时清理任务..."
     cat <<'EOF' > /etc/cron.daily/system-cleanup
@@ -172,7 +173,7 @@ EOF
     progress_bar 3
 }
 
-# 7. SSH安全配置（完整实现）
+# 7. SSH配置
 configure_ssh() {
     echo -e "${SUCCESS} 步骤7/7: 正在配置SSH安全设置..."
     mkdir -p /root/.ssh
@@ -188,7 +189,7 @@ configure_ssh() {
     progress_bar 3
 }
 
-# 主执行流程
+# 主函数
 main() {
     update_system
     install_components
