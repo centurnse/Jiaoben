@@ -172,7 +172,7 @@ EOF
     countdown 3
 }
 
-# 7. SSH配置（修复密码登录问题）
+# 7. SSH配置（彻底禁用密码登录）
 configure_ssh() {
     echo -e "${SUCCESS} 步骤7/7: 正在配置SSH安全设置..."
     mkdir -p /root/.ssh
@@ -182,12 +182,39 @@ configure_ssh() {
     chmod 600 /root/.ssh/authorized_keys
     grep -qxF "$(cat /root/.ssh/id_ed25519.pub)" /root/.ssh/authorized_keys || cat /root/.ssh/id_ed25519.pub >> /root/.ssh/authorized_keys
     
-    # 修复SSH配置
-    sed -i '/^#*PasswordAuthentication/c\PasswordAuthentication no' /etc/ssh/sshd_config
-    sed -i '/^#*PubkeyAuthentication/c\PubkeyAuthentication yes' /etc/ssh/sshd_config
-    sed -i '/^#*ChallengeResponseAuthentication/c\ChallengeResponseAuthentication no' /etc/ssh/sshd_config
-    sed -i '/^#*UsePAM/c\UsePAM no' /etc/ssh/sshd_config
-    
+    # 生成新的SSH配置文件
+    cat > /etc/ssh/sshd_config <<'EOF'
+Port 22
+Protocol 2
+HostKey /etc/ssh/ssh_host_ed25519_key
+HostKey /etc/ssh/ssh_host_rsa_key
+HostKey /etc/ssh/ssh_host_ecdsa_key
+SyslogFacility AUTHPRIV
+LogLevel INFO
+LoginGraceTime 30
+PermitRootLogin prohibit-password
+StrictModes yes
+MaxAuthTries 2
+MaxSessions 3
+PubkeyAuthentication yes
+AuthorizedKeysFile .ssh/authorized_keys
+PasswordAuthentication no
+ChallengeResponseAuthentication no
+GSSAPIAuthentication no
+GSSAPICleanupCredentials no
+UsePAM no
+X11Forwarding yes
+UseDNS no
+AcceptEnv LANG LC_*
+Subsystem sftp /usr/lib/openssh/sftp-server
+EOF
+
+    # 针对不同发行版的后缀配置
+    if command -v apt &> /dev/null; then
+        echo "Include /etc/ssh/sshd_config.d/*.conf" >> /etc/ssh/sshd_config
+        rm -f /etc/ssh/sshd_config.d/*password*.conf 2>/dev/null
+    fi
+
     # 检查配置有效性
     if ! sshd -t; then
         echo -e "${FAIL} SSH配置测试失败，正在恢复备份..."
@@ -213,6 +240,11 @@ main() {
     set_cronjob
     configure_ssh
     echo -e "\n${GREEN}所有任务已完成！${NC}"
+    
+    # 最终验证提示
+    echo -e "\n验证命令："
+    echo -e "1. 查看SSH配置：sshd -T | grep -Ei 'password|pam|challenge'"
+    echo -e "2. 测试密码登录：ssh -o PreferredAuthentications=password -o PubkeyAuthentication=no user@your_server"
 }
 
 main
