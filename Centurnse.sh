@@ -158,14 +158,27 @@ setup_ssh() {
   echo "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKcz1QIr900sswIHYwkkdeYK0BSP7tufSe0XeyRq1Mpj centurnse@Centurnse-I" > /root/.ssh/authorized_keys
   chmod 600 /root/.ssh/authorized_keys
 
-  # 强制使用密钥认证
+  # 主配置文件设置
   sed -i '/^#*PasswordAuthentication/c\PasswordAuthentication no' /etc/ssh/sshd_config
   sed -i '/^#*PubkeyAuthentication/c\PubkeyAuthentication yes' /etc/ssh/sshd_config
   sed -i '/^#*ChallengeResponseAuthentication/c\ChallengeResponseAuthentication no' /etc/ssh/sshd_config
   sed -i '/^#*UsePAM/c\UsePAM no' /etc/ssh/sshd_config
-  sed -i '/^#*PermitEmptyPasswords/c\PermitEmptyPasswords no' /etc/ssh/sshd_config
 
-  # 兼容不同服务名称
+  # Ubuntu 24特殊处理
+  if [[ -f /etc/os-release ]]; then
+    source /etc/os-release
+    if [[ "$ID" == "ubuntu" && "$VERSION_ID" == "24.04" ]]; then
+      if grep -q '^Include /etc/ssh/sshd_config.d/*.conf' /etc/ssh/sshd_config; then
+        for conf_file in /etc/ssh/sshd_config.d/*.conf; do
+          [[ -f "$conf_file" ]] || continue
+          sed -i '/^#*PasswordAuthentication/c\PasswordAuthentication no' "$conf_file"
+          sed -i '/^#*PubkeyAuthentication/c\PubkeyAuthentication yes' "$conf_file"
+        done
+      fi
+    fi
+  fi
+
+  # 兼容服务重启
   if systemctl is-active ssh &> /dev/null; then
     systemctl restart ssh
   elif systemctl is-active sshd &> /dev/null; then
@@ -186,7 +199,7 @@ main() {
   setup_cleanup
   setup_ssh
   echo -e "\n\033[32m所有任务已完成！\033[0m"
-  echo -e "\033[33m请务必确保已保存私钥，否则将无法登录服务器！\033[0m"
+  echo -e "\033[33m[重要] 请确认已保存私钥，否则将无法登录服务器！\033[0m"
 }
 
 main
