@@ -21,9 +21,12 @@ progress_bar() {
 update_system() {
   info "开始系统更新..."
   if command -v apt-get &> /dev/null; then
-    apt-get -qq update && apt-get -qq upgrade -y > /dev/null
+    apt-get -qq update > /dev/null 2>&1
+    DEBIAN_FRONTEND=noninteractive apt-get -qq upgrade -y > /dev/null 2>&1
+  elif command -v dnf &> /dev/null; then
+    dnf -q -y update > /dev/null 2>&1
   elif command -v yum &> /dev/null; then
-    yum -q -y update > /dev/null
+    yum -q -y update > /dev/null 2>&1
   else
     error "不支持的包管理器"
   fi
@@ -34,18 +37,28 @@ update_system() {
 # 2. 安装必要组件
 install_packages() {
   info "开始安装必要组件..."
-  packages=("wget" "curl" "vim" "mtr" "ufw" "ntpdate" "sudo" "unzip" "lvm2")
+  declare -A packages=(
+    ["apt"]="wget curl vim mtr ufw ntpdate sudo unzip lvm2"
+    ["yum"]="wget curl vim mtr ufw ntp sudo unzip lvm2"
+    ["dnf"]="wget curl vim mtr ufw ntp sudo unzip lvm2"
+  )
   
   if command -v apt-get &> /dev/null; then
-    for pkg in "${packages[@]}"; do
+    for pkg in ${packages["apt"]}; do
       if ! dpkg -s "$pkg" &> /dev/null; then
-        apt-get -qq install -y "$pkg" > /dev/null
+        DEBIAN_FRONTEND=noninteractive apt-get -qq install -y "$pkg" > /dev/null 2>&1
+      fi
+    done
+  elif command -v dnf &> /dev/null; then
+    for pkg in ${packages["dnf"]}; do
+      if ! rpm -q "$pkg" &> /dev/null; then
+        dnf -q -y install "$pkg" > /dev/null 2>&1
       fi
     done
   elif command -v yum &> /dev/null; then
-    for pkg in "${packages[@]}"; do
+    for pkg in ${packages["yum"]}; do
       if ! rpm -q "$pkg" &> /dev/null; then
-        yum -q -y install "$pkg" > /dev/null
+        yum -q -y install "$pkg" > /dev/null 2>&1
       fi
     done
   fi
@@ -56,9 +69,14 @@ install_packages() {
 # 3. 设置时区和时间同步
 setup_time() {
   info "设置时区和时间同步..."
-  timedatectl set-timezone Asia/Shanghai > /dev/null
-  ntpdate -u pool.ntp.org > /dev/null
-  echo "0 * * * * /usr/sbin/ntpdate pool.ntp.org > /dev/null 2>&1" | crontab -
+  timedatectl set-timezone Asia/Shanghai > /dev/null 2>&1
+  if command -v ntpdate &> /dev/null; then
+    ntpdate -u pool.ntp.org > /dev/null 2>&1
+    echo "0 * * * * /usr/sbin/ntpdate pool.ntp.org > /dev/null 2>&1" | crontab -
+  else
+    systemctl enable chronyd > /dev/null 2>&1
+    systemctl restart chronyd > /dev/null 2>&1
+  fi
   success "时间设置完成"
   progress_bar
 }
@@ -66,9 +84,9 @@ setup_time() {
 # 4. 配置防火墙
 setup_ufw() {
   info "配置UFW防火墙..."
-  ufw --force reset > /dev/null
+  ufw --force reset > /dev/null 2>&1
   while read -r rule; do
-    ufw $rule > /dev/null
+    ufw $rule > /dev/null 2>&1
   done << EOF
 allow 22/tcp
 allow 22/udp
@@ -99,7 +117,7 @@ deny from 2620:96:e000:b0cc:e::/80
 deny from 2602:80d:1003::/112
 deny from 2602:80d:1004::/112
 EOF
-  ufw --force enable > /dev/null
+  ufw --force enable > /dev/null 2>&1
   success "防火墙配置完成"
   progress_bar
 }
@@ -107,18 +125,15 @@ EOF
 # 5. 配置SWAP
 setup_swap() {
   info "配置SWAP..."
-  # 删除现有SWAP
-  swapoff -a
+  swapoff -a > /dev/null 2>&1
   if lsblk -o NAME,FSTYPE | grep -q swap; then
     lvremove -y $(lsblk -o NAME,FSTYPE | grep swap | awk '{print $1}') > /dev/null 2>&1 || true
   fi
   rm -f /swapfile*
 
-  # 计算内存和硬盘空间
   mem=$(free -m | awk '/Mem:/ {print $2}')
   disk_space=$(df -m / | awk 'NR==2 {print $4}')
 
-  # 根据条件创建SWAP
   if [ $mem -le 1024 ] && [ $disk_space -ge 3072 ]; then
     swap_size=512M
   elif [ $mem -gt 1024 ] && [ $mem -le 2048 ] && [ $disk_space -ge 10240 ]; then
@@ -130,9 +145,9 @@ setup_swap() {
     return
   fi
 
-  fallocate -l $swap_size /swapfile
+  fallocate -l $swap_size /swapfile > /dev/null 2>&1
   chmod 600 /swapfile
-  mkswap /swapfile > /dev/null
+  mkswap /swapfile > /dev/null 2>&1
   swapon /swapfile
   echo "/swapfile none swap sw 0 0" >> /etc/fstab
   success "SWAP配置完成 ($swap_size)"
@@ -145,7 +160,7 @@ setup_cleanup() {
   cat << EOF | crontab -
 0 0 * * * journalctl --vacuum-time=1d > /dev/null 2>&1
 0 0 * * * find /var/log -type f -name "*.log" -exec truncate -s 0 {} \; > /dev/null 2>&1
-0 0 * * * (command -v apt-get > /dev/null && apt-get clean) || (command -v yum > /dev/null && yum clean all) > /dev/null 2>&1
+0 0 * * * (command -v apt-get > /dev/null && apt-get clean) || (command -v dnf > /dev/null && dnf clean all) || (command -v yum > /dev/null && yum clean all) > /dev/null 2>&1
 EOF
   success "定时任务设置完成"
   progress_bar
@@ -163,7 +178,15 @@ setup_ssh() {
 
   sed -i 's/^#*PasswordAuthentication.*/PasswordAuthentication no/' /etc/ssh/sshd_config
   sed -i 's/^#*PubkeyAuthentication.*/PubkeyAuthentication yes/' /etc/ssh/sshd_config
-  systemctl restart sshd > /dev/null
+
+  # 兼容不同发行版的服务名称
+  if systemctl is-active ssh &> /dev/null; then
+    systemctl restart ssh
+  elif systemctl is-active sshd &> /dev/null; then
+    systemctl restart sshd
+  else
+    error "无法找到SSH服务"
+  fi
   success "SSH配置完成"
   progress_bar
 }
