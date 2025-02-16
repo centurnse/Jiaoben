@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -eo pipefail
-trap 'echo -e "\033[31m[错误] 在 $LINENO 行执行失败 | 最后命令：$BASH_COMMAND\033[0m"; exit 1' ERR
+trap 'echo -e "\033[31m[ERR] 在 $LINENO 行执行失败 | 最后命令：$BASH_COMMAND\033[0m"; exit 1' ERR
 
-# 颜色定义
+# ==================== 配置部分 ====================
 RED='\033[31m'
 GREEN='\033[32m'
 YELLOW='\033[33m'
@@ -10,37 +10,41 @@ BLUE='\033[34m'
 CYAN='\033[36m'
 NC='\033[0m'
 
-# 进度跟踪
-total_steps=8
-current_step=0
-steps_list=(
-    "系统更新"
-    "安装组件"
-    "时区设置"
-    "防火墙配置"
-    "SWAP管理"
-    "日志清理"
-    "SSH配置"
-    "网络优化"
+declare -A ERROR_CODES=(
+    [100]="系统检测失败"
+    [101]="非root权限"
+    [200]="系统更新失败"
+    [300]="组件安装失败"
+    [400]="时区设置失败"
+    [500]="防火墙配置错误"
+    [600]="SWAP管理失败"
+    [700]="日志清理配置错误"
+    [800]="SSH加固失败"
+    [900]="网络优化失败"
 )
 
+# ==================== 功能函数 ====================
 display_progress() {
-    echo -e "\n${CYAN}==================================================${NC}"
-    echo -e "${GREEN}▶ 当前进度：$current_step/$total_steps ${NC}"
-    echo -e "${BLUE}▷ 正在执行：${steps_list[$current_step-1]}${NC}"
-    (( current_step < total_steps )) && echo -e "${YELLOW}▷ 后续任务：${steps_list[$current_step]}${NC}" || echo -e "${YELLOW}▷ 后续任务：完成所有配置${NC}"
-    echo -e "${CYAN}==================================================${NC}\n"
+    clear
+    echo -e "${CYAN}=================================================="
+    echo " 自动化系统优化脚本"
+    echo -e "==================================================${NC}"
+    echo -e "${GREEN}▶ 当前进度：$1/$2"
+    echo -e "${BLUE}▷ 正在执行：${3}"
+    echo -e "${YELLOW}▷ 后续任务：${4}"
+    echo -e "${CYAN}==================================================${NC}"
+    echo
 }
 
 progress_countdown() {
     for i in {3..1}; do
-        echo -ne "${YELLOW}倒计时：${i} 秒\033[0K\r${NC}"
+        echo -ne "${YELLOW}倒计时：${i} 秒\033[0K\r"
         sleep 1
     done
-    echo
+    echo -e "${NC}"
 }
 
-# 系统检测
+# ==================== 核心功能 ====================
 detect_distro() {
     if [[ -f /etc/os-release ]]; then
         source /etc/os-release
@@ -50,118 +54,108 @@ detect_distro() {
     elif [[ -f /etc/debian_version ]]; then
         DISTRO="debian"
     else
-        echo -e "${RED}错误：无法检测Linux发行版${NC}"
-        exit 1
+        echo -e "${RED}错误：无法检测Linux发行版"
+        exit 100
     fi
+    echo -e "${BLUE}[系统检测] 发行版：${DISTRO}${NC}"
 }
 
-# 1. 系统更新
 system_update() {
-    ((current_step++))
-    display_progress
-    
     case $DISTRO in
         ubuntu|debian)
-            export DEBIAN_FRONTEND=noninteractive
-            apt-get -o DPkg::Lock::Timeout=120 -qq update >/dev/null
-            apt-get -o DPkg::Lock::Timeout=600 -qq -y --allow-downgrades --allow-remove-essential --allow-change-held-packages upgrade >/dev/null
+            if ! DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=120 -qq update; then
+                echo -e "${RED}APT源更新失败"
+                exit 200
+            fi
+            if ! DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=600 -qq -y --allow-downgrades --allow-remove-essential --allow-change-held-packages upgrade; then
+                echo -e "${RED}系统升级失败"
+                exit 200
+            fi
             ;;
         centos|fedora|rhel)
-            yum -y -q update >/dev/null
+            if ! yum -y -q --nobest update; then
+                echo -e "${RED}YUM更新失败"
+                exit 200
+            fi
             ;;
         alpine)
-            apk -q update >/dev/null
-            apk -q upgrade >/dev/null
+            if ! apk -q update; then
+                echo -e "${RED}APK更新失败"
+                exit 200
+            fi
+            if ! apk -q upgrade; then
+                echo -e "${RED}APK升级失败"
+                exit 200
+            fi
             ;;
-        *) exit 1 ;;
+        *) exit 100 ;;
     esac
-    
-    echo -e "${GREEN}[✓] 系统更新完成${NC}"
-    progress_countdown
 }
 
-# 2. 安装组件
 install_essentials() {
-    ((current_step++))
-    display_progress
-    
     pkg_list="wget curl vim mtr ufw ntpdate sudo unzip lvm2"
     
     case $DISTRO in
         ubuntu|debian)
-            apt-get -qq -y install $pkg_list >/dev/null
+            if ! DEBIAN_FRONTEND=noninteractive apt-get -qq -y install $pkg_list; then
+                echo -e "${RED}组件安装失败"
+                exit 300
+            fi
             ;;
         centos|fedora|rhel)
-            [[ "$DISTRO" == "centos" ]] && yum -y -q install epel-release >/dev/null
-            yum -y -q install $pkg_list >/dev/null
-            systemctl enable ufw >/dev/null 2>&1 || true
+            [[ "$DISTRO" == "centos" ]] && yum -y -q install epel-release
+            if ! yum -y -q install $pkg_list; then
+                echo -e "${RED}组件安装失败"
+                exit 300
+            fi
+            systemctl enable --now ufw
             ;;
         alpine)
-            apk add -q $pkg_list >/dev/null
-            rc-update add ufw default >/dev/null 2>&1 || true
+            if ! apk add -q $pkg_list; then
+                echo -e "${RED}组件安装失败"
+                exit 300
+            fi
+            rc-update add ufw default
             ;;
     esac
-    
-    echo -e "${GREEN}[✓] 组件安装完成${NC}"
-    progress_countdown
 }
 
-# 3. 时区设置
 configure_timezone() {
-    ((current_step++))
-    display_progress
-    
     timedatectl set-timezone Asia/Shanghai 2>/dev/null || ln -sf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime
-    ntpdate -u pool.ntp.org >/dev/null 2>&1
-    echo "0 * * * * /usr/sbin/ntpdate pool.ntp.org >/dev/null 2>&1" | crontab -
-    
-    echo -e "${GREEN}[✓] 时区设置完成${NC}"
-    progress_countdown
+    ntpdate -u pool.ntp.org >/dev/null || echo -e "${YELLOW}[警告] 时间同步失败"
+    echo "0 * * * * /usr/sbin/ntpdate pool.ntp.org >/dev/null" | crontab -
 }
 
-# 4. 防火墙配置
 setup_firewall() {
-    ((current_step++))
-    display_progress
-    
-    ufw --force reset >/dev/null
-    ufw disable >/dev/null
-    
-    ports=(22 80 88 443 5555 8008 32767 32768)
-    for port in "${ports[@]}"; do
-        ufw allow $port/tcp >/dev/null
-        ufw allow $port/udp >/dev/null
+    ufw --force reset
+    ufw disable
+
+    for port in 22 80 88 443 5555 8008 32767 32768; do
+        ufw allow $port/tcp
+        ufw allow $port/udp
     done
-    
-    deny_subnets=(
-        162.142.125.0/24
-        167.94.138.0/24
-        167.94.145.0/24
-        167.94.146.0/24
-        167.248.133.0/24
-        199.45.154.0/24
-        199.45.155.0/24
-        206.168.34.0/24
-        2602:80d:1000:b0cc:e::/80
-        2620:96:e000:b0cc:e::/80
-        2602:80d:1003::/112
+
+    for subnet in \
+        162.142.125.0/24 \
+        167.94.138.0/24 \
+        167.94.145.0/24 \
+        167.94.146.0/24 \
+        167.248.133.0/24 \
+        199.45.154.0/24 \
+        199.45.155.0/24 \
+        206.168.34.0/24 \
+        2602:80d:1000:b0cc:e::/80 \
+        2620:96:e000:b0cc:e::/80 \
+        2602:80d:1003::/112 \
         2602:80d:1004::/112
-    )
-    for subnet in "${deny_subnets[@]}"; do
-        ufw deny from "$subnet" >/dev/null
+    do
+        ufw deny from $subnet
     done
-    
-    echo "y" | ufw enable >/dev/null
-    
-    echo -e "${GREEN}[✓] 防火墙配置完成${NC}"
-    progress_countdown
+
+    echo "y" | ufw enable
 }
 
-# 5. SWAP管理
 manage_swap() {
-    ((current_step++))
-    display_progress
-    
     if swapon --show | grep -q .; then
         swap_device=$(swapon --show=NAME --noheadings --raw | head -1)
         swapoff "$swap_device"
@@ -179,26 +173,17 @@ manage_swap() {
     elif (( mem_total > 2048 && mem_total <= 4096 && disk_space >= 20480 )); then
         swap_size=2G
     else
-        echo -e "${GREEN}[✓] 跳过SWAP配置${NC}"
-        progress_countdown
         return
     fi
 
-    fallocate -l "$swap_size" /swapfile
+    fallocate -l $swap_size /swapfile
     chmod 600 /swapfile
-    mkswap /swapfile >/dev/null
+    mkswap /swapfile
     swapon /swapfile
     echo "/swapfile swap swap defaults 0 0" >> /etc/fstab
-    
-    echo -e "${GREEN}[✓] SWAP配置完成${NC}"
-    progress_countdown
 }
 
-# 6. 日志清理
 configure_logclean() {
-    ((current_step++))
-    display_progress
-    
     cat > /usr/local/bin/logclean <<'EOF'
 #!/bin/bash
 journalctl --vacuum-time=1d
@@ -209,17 +194,11 @@ find /var/log -type f \( -name "*.gz" -o -name "*.old" -o -name "*.log.*" \) -de
 EOF
 
     chmod +x /usr/local/bin/logclean
-    echo "0 0 * * * root /usr/local/bin/logclean >/dev/null" > /etc/cron.d/daily_logclean
-    
-    echo -e "${GREEN}[✓] 日志清理配置完成${NC}"
-    progress_countdown
+    echo "0 0 * * * root /usr/local/bin/logclean" > /etc/cron.d/daily_logclean
+    chmod 644 /etc/cron.d/daily_logclean
 }
 
-# 7. SSH加固
 harden_ssh() {
-    ((current_step++))
-    display_progress
-    
     mkdir -p /root/.ssh
     chmod 700 /root/.ssh
     echo "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKcz1QIr900sswIHYwkkdeYK0BSP7tufSe0XeyRq1Mpj centurnse@Centurnse-I" > /root/.ssh/authorized_keys
@@ -230,24 +209,15 @@ harden_ssh() {
 
     if [[ -d /etc/ssh/sshd_config.d ]]; then
         for f in /etc/ssh/sshd_config.d/*.conf; do
-            [[ -f "$f" ]] && sed -i 's/PasswordAuthentication yes/PasswordAuthentication no/' "$f"
+            sed -i 's/PasswordAuthentication yes/PasswordAuthentication no/' "$f"
         done
     fi
 
-    systemctl restart sshd >/dev/null 2>&1 || systemctl restart ssh >/dev/null 2>&1
-    
-    echo -e "${GREEN}[✓] SSH加固完成${NC}"
-    progress_countdown
+    systemctl restart sshd 2>/dev/null || systemctl restart ssh 2>/dev/null
 }
 
-# 8. 网络优化
 optimize_network() {
-    ((current_step++))
-    display_progress
-    
-    sysctl_conf="/etc/sysctl.conf"
-    grep -q "net.ipv4.tcp_congestion_control" $sysctl_conf || {
-        cat >> $sysctl_conf <<'EOF'
+    cat >> /etc/sysctl.conf <<'EOF'
 net.ipv4.tcp_no_metrics_save=1
 net.ipv4.tcp_ecn=0
 net.ipv4.tcp_frto=0
@@ -271,30 +241,52 @@ net.ipv4.ip_forward=1
 net.ipv4.conf.all.forwarding=1
 net.ipv4.conf.default.forwarding=1
 EOF
-    }
 
     sysctl -p >/dev/null
-    
-    echo -e "${GREEN}[✓] 网络优化完成${NC}"
-    progress_countdown
 }
 
-# 主执行流程
+# ==================== 主流程 ====================
 main() {
-    # 检查root权限
-    [[ $EUID -ne 0 ]] && { echo -e "${RED}错误：必须使用root权限运行本脚本${NC}"; exit 1; }
-    
+    [[ $EUID -ne 0 ]] && { echo -e "${RED}必须使用root权限运行"; exit 101; }
+
+    # 初始化进度
+    local total_steps=8
+    local current_step=0
+    local steps=(
+        "系统更新"
+        "安装组件"
+        "时区设置"
+        "防火墙配置"
+        "SWAP管理"
+        "日志清理"
+        "SSH配置"
+        "网络优化"
+    )
+
     detect_distro
-    system_update
-    install_essentials
-    configure_timezone
-    setup_firewall
-    manage_swap
-    configure_logclean
-    harden_ssh
-    optimize_network
-    
-    echo -e "\n${GREEN}✔ 所有优化配置已完成！${NC}"
+
+    for step in "${!steps[@]}"; do
+        current_step=$((step+1))
+        next_step=$((current_step+1))
+        display_progress $current_step $total_steps "${steps[$step]}" "${steps[$next_step]:-完成}"
+        
+        case $current_step in
+            1) system_update ;;
+            2) install_essentials ;;
+            3) configure_timezone ;;
+            4) setup_firewall ;;
+            5) manage_swap ;;
+            6) configure_logclean ;;
+            7) harden_ssh ;;
+            8) optimize_network ;;
+        esac
+
+        echo -e "${GREEN}[✓] ${steps[$step]} 完成"
+        progress_countdown
+    done
+
+    echo -e "\n${CYAN}=================================================="
+    echo -e "${GREEN}✔ 所有优化配置已完成！"
     echo -e "${CYAN}==================================================${NC}"
 }
 
