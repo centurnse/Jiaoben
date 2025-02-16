@@ -11,36 +11,32 @@ CYAN='\033[36m'
 NC='\033[0m'
 
 # ==================== 功能函数 ====================
-display_progress() {
+display_header() {
     clear
     echo -e "${CYAN}=================================================="
     echo " 自动化系统优化脚本"
     echo -e "==================================================${NC}"
+}
+
+display_progress() {
     echo -e "${GREEN}▶ 当前进度：$1/$2"
     echo -e "${BLUE}▷ 正在执行：${3}"
     echo -e "${YELLOW}▷ 后续任务：${4}"
-    echo -e "   ${YELLOW}⏳ 倒计时进行中..."  # 固定倒计时行
+    echo -e "   ${YELLOW}⏳ 将在3秒后继续"
     echo -e "${CYAN}==================================================${NC}"
 }
 
 dynamic_countdown() {
     local seconds=3
     while (( seconds > 0 )); do
-        # 定位到倒计时行并更新内容
-        echo -ne "\033[5A\033[2K"  # 上移5行清除旧内容
-        echo -e "${CYAN}=================================================="
-        echo " 自动化系统优化脚本"
-        echo -e "==================================================${NC}"
-        echo -e "${GREEN}▶ 当前进度：$current_step/$total_steps"
-        echo -e "${BLUE}▷ 正在执行：${steps[$step]}"
-        echo -e "${YELLOW}▷ 后续任务：${steps[$next_step]:-完成}"
-        echo -ne "   ${YELLOW}⏳ 将在 ${seconds} 秒后继续\033[K\r"
-        echo -e "${CYAN}==================================================${NC}"
+        # 仅更新倒计时行
+        echo -ne "\033[2A\033[2K"  # 上移2行并清除
+        echo -ne "   ${YELLOW}⏳ 将在${seconds}秒后继续\033[K\r"
+        echo -ne "\033[1B"  # 移回原位
         sleep 1
         ((seconds--))
     done
-    # 清除倒计时显示
-    echo -ne "\033[5A\033[2K"
+    echo -ne "\033[2A\033[2K"  # 清除倒计时显示
 }
 
 # ==================== 核心功能 ====================
@@ -239,6 +235,8 @@ main() {
     for step in "${!steps[@]}"; do
         current_step=$((step+1))
         next_step=$((current_step+1))
+        
+        display_header
         display_progress $current_step $total_steps "${steps[$step]}" "${steps[$next_step]:-完成}"
         dynamic_countdown
         
@@ -254,10 +252,7 @@ main() {
         esac
     done
 
-    clear
-    echo -e "${CYAN}=================================================="
-    echo " 自动化系统优化脚本"
-    echo -e "==================================================${NC}"
+    display_header
     echo -e "${GREEN}✔ 所有优化配置已完成！"
     echo -e "${CYAN}==================================================${NC}"
 }
