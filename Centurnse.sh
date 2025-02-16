@@ -16,7 +16,7 @@ error_exit() {
 
 trap 'error_exit $LINENO "$BASH_COMMAND"' ERR
 
-# 完全修正的进度条函数
+# 修正后的进度条函数
 progress_bar() {
     local duration=$1
     echo -ne "进度：[........................] 0%\r"
@@ -26,10 +26,10 @@ progress_bar() {
         filled=$(( (i * 20) / duration ))
         bar=$(printf "%0.s#" $(seq 1 $filled))
         space=$(printf "%0.s " $(seq 1 $((20 - filled))))
-        # 使用ANSI转义序列清除到行尾
-        echo -ne "进度：[$bar$space] $percent%\033[K\r"
+        # 使用ANSI转义序列清除行尾
+        echo -ne "进度：[$bar$space] ${percent}%\033[K\r"
     done
-    # 最终显示使用printf确保格式正确
+    # 使用printf确保单百分号输出
     printf "进度：[####################] 100%%\n\n"
 }
 
