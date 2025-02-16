@@ -16,7 +16,7 @@ error_exit() {
 
 trap 'error_exit $LINENO "$BASH_COMMAND"' ERR
 
-# 修正后的进度条函数
+# 优化的进度条函数
 progress_bar() {
     local duration=$1
     echo -ne "进度：[........................] 0%\r"
@@ -26,10 +26,8 @@ progress_bar() {
         filled=$(( (i * 20) / duration ))
         bar=$(printf "%0.s#" $(seq 1 $filled))
         space=$(printf "%0.s " $(seq 1 $((20 - filled))))
-        # 使用ANSI转义序列清除行尾
         echo -ne "进度：[$bar$space] ${percent}%\033[K\r"
     done
-    # 使用printf确保单百分号输出
     printf "进度：[####################] 100%%\n\n"
 }
 
@@ -74,7 +72,8 @@ install_components() {
 # 3. 时区设置
 set_timezone() {
     echo -e "${SUCCESS} 步骤3/7: 正在设置时区..."
-    timedatectl set-timezone Asia/Shanghai >/dev/null
+    timedatectl set-timezone Asia/Shanghai >/dev/null 2>&1 || \
+    ln -sf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime
     ntpdate pool.ntp.org >/dev/null 2>&1
     echo "0 * * * * /usr/sbin/ntpdate pool.ntp.org > /dev/null 2>&1" | crontab -
     progress_bar 3
@@ -120,36 +119,42 @@ EOF
     progress_bar 3
 }
 
-# 5. SWAP管理
+# 5. SWAP管理（修复CentOS兼容性问题）
 manage_swap() {
     echo -e "${SUCCESS} 步骤5/7: 正在优化SWAP配置..."
+    # 移除现有SWAP
     swap_targets=$(swapon --show=NAME --noheadings 2>/dev/null)
     for target in $swap_targets; do
         swapoff $target >/dev/null 2>&1
         if [[ $target =~ ^/dev/mapper/ ]]; then
             lvremove -fy ${target} >/dev/null 2>&1
-        else
+        elif [[ -f $target ]]; then
             rm -f $target
         fi
     done
     
+    # 计算内存和磁盘空间
     mem_total=$(free -m | awk '/Mem:/ {print $2}')
     disk_available=$(df -m / | awk 'NR==2 {print $4}')
     
+    # 计算SWAP大小
     swap_size=0
     if (( mem_total <= 1024 )) && (( disk_available >= 3072 )); then
-        swap_size=512M
+        swap_size=512
     elif (( mem_total > 1024 && mem_total <= 2048 )) && (( disk_available >= 10240 )); then
-        swap_size=1G
+        swap_size=1024
     elif (( mem_total > 2048 && mem_total <= 4096 )) && (( disk_available >= 20480 )); then
-        swap_size=2G
+        swap_size=2048
     fi
     
-    if [[ $swap_size != 0 ]]; then
-        fallocate -l $swap_size /swapfile >/dev/null 2>&1
+    # 创建SWAP文件（兼容CentOS）
+    if (( swap_size > 0 )); then
+        rm -f /swapfile
+        # 使用dd代替fallocate确保兼容性
+        dd if=/dev/zero of=/swapfile bs=1M count=$swap_size >/dev/null 2>&1
         chmod 600 /swapfile
-        mkswap /swapfile >/dev/null 2>&1
-        swapon /swapfile
+        mkswap -f /swapfile >/dev/null 2>&1
+        swapon /swapfile || error_exit $LINENO "SWAP激活失败"
         echo "/swapfile swap swap defaults 0 0" >> /etc/fstab
     fi
     progress_bar 3
