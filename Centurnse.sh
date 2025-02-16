@@ -1,200 +1,127 @@
 #!/bin/bash
 
-# 初始化设置
-exec 2>&1
-set -eo pipefail
-BOLD="\033[1m"
-GREEN="\033[32m"
-RED="\033[31m"
-YELLOW="\033[33m"
-NC="\033[0m"
-SUCCESS_LIST=()
-ERROR_LIST=()
-
-# 进度条函数
-countdown() {
-    echo -ne "${YELLOW}等待3秒...${NC}"
-    for i in {3..1}; do
-        echo -ne "${YELLOW}\r等待${i}秒...${NC}"
-        sleep 1
-    done
-    echo -e "\n"
+# 美化输出函数
+print_msg() {
+  echo -e "\033[1;34m[INFO]\033[0m $1"
+}
+print_error() {
+  echo -e "\033[1;31m[ERROR]\033[0m $1"
+  exit 1
+}
+show_progress() {
+  for i in {3..1}; do
+    echo -ne "\033[1;32mProceeding in $i...\033[0m\r"
+    sleep 1
+  done
+  echo -ne "\033[0K\r"
 }
 
 # 错误处理函数
-error_handler() {
-    local exit_code=$?
-    echo -e "\n${RED}${BOLD}[错误] 在步骤: $1${NC}"
-    echo -e "${RED}错误代码: $exit_code${NC}"
-    exit $exit_code
+handle_error() {
+  print_error "An error occurred. Exiting."
 }
+trap handle_error ERR
 
-# 系统更新函数
-system_update() {
-    trap 'error_handler "系统更新"' ERR
-    echo -e "${GREEN}正在检测系统类型...${NC}"
-    
-    if [ -f /etc/debian_version ]; then
-        echo -e "${GREEN}检测到 Debian/Ubuntu 系统${NC}"
-        apt-get -qq update > /dev/null
-        apt-get -qq -y upgrade > /dev/null
-    elif [ -f /etc/redhat-release ]; then
-        echo -e "${GREEN}检测到 RHEL/CentOS 系统${NC}"
-        yum -q -y update > /dev/null
-    elif [ -f /etc/alpine-release ]; then
-        echo -e "${GREEN}检测到 Alpine 系统${NC}"
-        apk update --quiet
-        apk upgrade --quiet
-    else
-        echo -e "${RED}不支持的Linux发行版${NC}"
-        exit 1
-    fi
-    
-    SUCCESS_LIST+=("系统更新完成")
-    countdown
-}
+# 隐藏命令输出
+exec &>/tmp/script.log
 
-# 组件安装函数
-install_components() {
-    trap 'error_handler "组件安装"' ERR
-    components=("wget" "curl" "vim" "mtr" "ufw" "ntpdate" "sudo" "unzip" "lvm2")
-    
-    if [ -f /etc/debian_version ]; then
-        for pkg in "${components[@]}"; do
-            if ! dpkg -l | grep -q "^ii  $pkg "; then
-                apt-get -qq -y install $pkg > /dev/null
-            fi
-        done
-    elif [ -f /etc/redhat-release ]; then
-        for pkg in "${components[@]}"; do
-            if ! rpm -qa | grep -q "^$pkg"; then
-                yum -q -y install $pkg > /dev/null
-            fi
-        done
-    fi
-    
-    SUCCESS_LIST+=("必要组件安装完成")
-    countdown
-}
+# 1. 根据系统进行更新
+print_msg "Updating system packages..."
+if [[ -f /etc/debian_version ]]; then
+  apt-get update && apt-get upgrade -y
+elif [[ -f /etc/redhat-release ]]; then
+  yum update -y
+else
+  print_error "Unsupported system."
+fi
+print_msg "System updated successfully."
+show_progress
 
-# 时间设置函数
-time_config() {
-    trap 'error_handler "时间设置"' ERR
-    timedatectl set-timezone Asia/Shanghai
-    ntpdate -u pool.ntp.org > /dev/null
-    echo "0 * * * * /usr/sbin/ntpdate pool.ntp.org > /dev/null 2>&1" | crontab -
-    
-    SUCCESS_LIST+=("时区设置和时间同步完成")
-    countdown
-}
+# 2. 安装必要组件
+print_msg "Installing necessary packages..."
+packages=(wget curl vim mtr ufw ntpdate sudo unzip lvm2)
+for pkg in "${packages[@]}"; do
+  if ! command -v $pkg &>/dev/null; then
+    [[ -f /etc/debian_version ]] && apt-get install -y $pkg
+    [[ -f /etc/redhat-release ]] && yum install -y $pkg
+  fi
+done
+print_msg "All packages installed successfully."
+show_progress
 
-# 防火墙配置函数（已修复自动确认问题）
-configure_firewall() {
-    trap 'error_handler "防火墙配置"' ERR
-    yes | ufw --force reset > /dev/null
-    
-    declare -a rules=(
-        "allow 22/tcp" "allow 22/udp" "allow 80/tcp" "allow 80/udp"
-        "allow 88/tcp" "allow 88/udp" "allow 443/tcp" "allow 443/udp"
-        "allow 5555/tcp" "allow 5555/udp" "allow 8008/tcp" "allow 8008/udp"
-        "allow 32767/tcp" "allow 32767/udp" "allow 32768/tcp" "allow 32768/udp"
-        "deny from 162.142.125.0/24" "deny from 167.94.138.0/24"
-        "deny from 167.94.145.0/24" "deny from 167.94.146.0/24"
-        "deny from 167.248.133.0/24" "deny from 199.45.154.0/24"
-        "deny from 199.45.155.0/24" "deny from 206.168.34.0/24"
-        "deny from 2602:80d:1000:b0cc:e::/80" "deny from 2620:96:e000:b0cc:e::/80"
-        "deny from 2602:80d:1003::/112" "deny from 2602:80d:1004::/112"
-    )
-    
-    for rule in "${rules[@]}"; do
-        yes | ufw $rule > /dev/null
-    done
-    
-    yes | ufw --force enable > /dev/null
-    SUCCESS_LIST+=("防火墙配置完成")
-    countdown
-}
+# 3. 设置时区并同步时间
+print_msg "Configuring timezone and syncing time..."
+timedatectl set-timezone Asia/Shanghai
+timedatectl set-ntp true
+ntpdate cn.pool.ntp.org
+(crontab -l 2>/dev/null; echo "0 * * * * /usr/sbin/ntpdate cn.pool.ntp.org") | crontab -
+print_msg "Timezone set and time synchronized successfully."
+show_progress
 
-# SWAP管理函数
-manage_swap() {
-    trap 'error_handler "SWAP管理"' ERR
-    mem_total=$(free -m | awk '/Mem:/ {print $2}')
-    disk_space=$(df -m / | awk 'NR==2 {print $4}')
-    
-    # 删除现有SWAP
-    if swapon --show | grep -q .; then
-        swapoff -a
-        sed -i '/swap/d' /etc/fstab
-    fi
-    
-    # 根据条件创建新SWAP
-    if [ $mem_total -le 1024 ] && [ $disk_space -ge 3072 ]; then
-        dd if=/dev/zero of=/swapfile bs=1M count=512
-        chmod 600 /swapfile
-        mkswap /swapfile
-        swapon /swapfile
-        echo '/swapfile swap swap defaults 0 0' >> /etc/fstab
-    elif [ $mem_total -gt 1024 ] && [ $mem_total -le 2048 ] && [ $disk_space -ge 10240 ]; then
-        dd if=/dev/zero of=/swapfile bs=1M count=1024
-        chmod 600 /swapfile
-        mkswap /swapfile
-        swapon /swapfile
-        echo '/swapfile swap swap defaults 0 0' >> /etc/fstab
-    elif [ $mem_total -gt 2048 ] && [ $mem_total -le 4096 ] && [ $disk_space -ge 20480 ]; then
-        dd if=/dev/zero of=/swapfile bs=1M count=2048
-        chmod 600 /swapfile
-        mkswap /swapfile
-        swapon /swapfile
-        echo '/swapfile swap swap defaults 0 0' >> /etc/fstab
-    fi
-    
-    SUCCESS_LIST+=("SWAP优化完成")
-    countdown
-}
+# 4. 配置防火墙
+print_msg "Configuring firewall rules..."
+ufw --force reset
+rules=(
+  "allow 22/tcp" "allow 22/udp" "allow 80/tcp" "allow 80/udp"
+  "allow 88/tcp" "allow 88/udp" "allow 443/tcp" "allow 443/udp"
+  "allow 5555/tcp" "allow 5555/udp" "allow 8008/tcp" "allow 8008/udp"
+  "allow 32767/tcp" "allow 32767/udp" "allow 32768/tcp" "allow 32768/udp"
+  "deny from 162.142.125.0/24" "deny from 167.94.138.0/24"
+  "deny from 167.94.145.0/24" "deny from 167.94.146.0/24"
+  "deny from 167.248.133.0/24" "deny from 199.45.154.0/24"
+  "deny from 199.45.155.0/24" "deny from 206.168.34.0/24"
+  "deny from 2602:80d:1000:b0cc:e::/80" "deny from 2620:96:e000:b0cc:e::/80"
+  "deny from 2602:80d:1003::/112" "deny from 2602:80d:1004::/112"
+)
+for rule in "${rules[@]}"; do
+  ufw $rule
+done
+ufw --force enable
+print_msg "Firewall rules configured successfully."
+show_progress
 
-# 日志清理任务
-setup_log_clean() {
-    trap 'error_handler "日志清理设置"' ERR
-    echo "0 0 * * * journalctl --rotate --vacuum-time=1s && rm -rf /var/log/*.log.* && apt clean" | crontab -
-    
-    SUCCESS_LIST+=("日志清理任务设置完成")
-    countdown
-}
+# 5. 检测并配置SWAP
+print_msg "Configuring SWAP space..."
+mem_total=$(grep MemTotal /proc/meminfo | awk '{print $2}')
+disk_avail=$(df / | tail -1 | awk '{print $4}')
+swapoff -a
+lvremove -y $(lvs --noheadings -o lv_path 2>/dev/null | grep swap) 2>/dev/null || true
+rm -f /swapfile
 
-# SSH配置函数
-configure_ssh() {
-    trap 'error_handler "SSH配置"' ERR
-    mkdir -p /root/.ssh
-    chmod 700 /root/.ssh
-    echo "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKcz1QIr900sswIHYwkkdeYK0BSP7tufSe0XeyRq1Mpj centurnse@Centurnse-I" > /root/.ssh/id_ed25519.pub
-    
-    if [ ! -f /root/.ssh/authorized_keys ]; then
-        touch /root/.ssh/authorized_keys
-    fi
-    chmod 600 /root/.ssh/authorized_keys
-    cat /root/.ssh/id_ed25519.pub >> /root/.ssh/authorized_keys
-    
-    sed -i 's/^#*PasswordAuthentication.*/PasswordAuthentication no/' /etc/ssh/sshd_config
-    sed -i 's/^#*PubkeyAuthentication.*/PubkeyAuthentication yes/' /etc/ssh/sshd_config
-    systemctl restart sshd
-    
-    SUCCESS_LIST+=("SSH安全配置完成")
-    countdown
-}
+if (( mem_total <= 1048576 && disk_avail >= 3145728 )); then
+  fallocate -l 512M /swapfile
+elif (( mem_total > 1048576 && mem_total <= 2097152 && disk_avail >= 10485760 )); then
+  fallocate -l 1G /swapfile
+elif (( mem_total > 2097152 && mem_total <= 4194304 && disk_avail >= 20971520 )); then
+  fallocate -l 2G /swapfile
+fi
+if [[ -f /swapfile ]]; then
+  chmod 600 /swapfile
+  mkswap /swapfile
+  swapon /swapfile
+  echo "/swapfile none swap sw 0 0" >> /etc/fstab
+fi
+print_msg "SWAP space configured successfully."
+show_progress
 
-# 主执行流程
-main() {
-    system_update
-    install_components
-    time_config
-    configure_firewall
-    manage_swap
-    setup_log_clean
-    configure_ssh
-    
-    echo -e "\n${GREEN}${BOLD}所有任务已完成:${NC}"
-    printf "• %s\n" "${SUCCESS_LIST[@]}"
-    countdown
-}
+# 6. 设置定时任务
+print_msg "Setting up cron job for log cleaning..."
+(crontab -l 2>/dev/null; echo "0 0 * * * rm -rf /var/log/* /var/log/journal/* /var/cache/*") | crontab -
+print_msg "Cron job configured successfully."
+show_progress
 
-main
+# 7. 配置SSH
+print_msg "Configuring SSH access..."
+mkdir -p /root/.ssh
+chmod 700 /root/.ssh
+echo "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKcz1QIr900sswIHYwkkdeYK0BSP7tufSe0XeyRq1Mpj centurnse@Centurnse-I" > /root/.ssh/id_ed25519.pub
+chmod 600 /root/.ssh/id_ed25519.pub
+cat /root/.ssh/id_ed25519.pub >> /root/.ssh/authorized_keys
+chmod 600 /root/.ssh/authorized_keys
+sed -i 's/#\?PasswordAuthentication yes/PasswordAuthentication no/' /etc/ssh/sshd_config
+sed -i 's/#\?PubkeyAuthentication no/PubkeyAuthentication yes/' /etc/ssh/sshd_config
+systemctl restart sshd
+print_msg "SSH access configured successfully."
+show_progress
+
+print_msg "All tasks completed successfully!"
