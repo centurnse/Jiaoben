@@ -16,7 +16,7 @@ error_exit() {
 
 trap 'error_exit $LINENO "$BASH_COMMAND"' ERR
 
-# 优化后的进度条函数
+# 优化的进度条函数
 progress_bar() {
     local duration=$1
     echo -ne "进度：[........................] 0%\r"
@@ -32,11 +32,11 @@ progress_bar() {
     echo -e "\n"
 }
 
-# 1. 系统更新（已修复apt警告）
+# 1. 系统更新（静默模式）
 update_system() {
     echo -e "\n${SUCCESS} 步骤1/7: 正在更新系统..."
     if command -v apt &> /dev/null; then
-        apt -qq update -y > /dev/null 2>&1 
+        DEBIAN_FRONTEND=noninteractive apt -qq update -y > /dev/null 2>&1
         DEBIAN_FRONTEND=noninteractive apt -qq upgrade -y > /dev/null 2>&1
     elif command -v yum &> /dev/null; then
         yum update -y > /dev/null 2>&1
@@ -51,7 +51,7 @@ update_system() {
     progress_bar 3
 }
 
-# 2. 安装组件（已优化输出）
+# 2. 静默安装组件
 install_components() {
     echo -e "${SUCCESS} 步骤2/7: 正在安装必要组件..."
     packages=(wget curl vim mtr ufw ntpdate sudo unzip lvm2)
@@ -70,21 +70,21 @@ install_components() {
     progress_bar 3
 }
 
-# 3. 时区设置
+# 3. 时区配置
 set_timezone() {
     echo -e "${SUCCESS} 步骤3/7: 正在设置时区..."
-    timedatectl set-timezone Asia/Shanghai
-    ntpdate pool.ntp.org >/dev/null
+    timedatectl set-timezone Asia/Shanghai >/dev/null
+    ntpdate pool.ntp.org >/dev/null 2>&1
     echo "0 * * * * /usr/sbin/ntpdate pool.ntp.org > /dev/null 2>&1" | crontab -
     progress_bar 3
 }
 
-# 4. 防火墙配置
+# 4. 防火墙配置（修复EOF问题）
 configure_ufw() {
     echo -e "${SUCCESS} 步骤4/7: 正在配置防火墙..."
-    ufw --force reset >/dev/null
+    ufw --force reset >/dev/null 2>&1
     while read -r rule; do
-        ufw $rule >/dev/null
+        ufw $rule >/dev/null 2>&1
     done <<'EOF'
 allow 22/tcp
 allow 22/udp
@@ -115,18 +115,18 @@ deny from 2620:96:e000:b0cc:e::/80
 deny from 2602:80d:1003::/112
 deny from 2602:80d:1004::/112
 EOF
-    ufw --force enable >/dev/null
+    ufw --force enable >/dev/null 2>&1
     progress_bar 3
 }
 
-# 5. SWAP管理
+# 5. SWAP管理（增强兼容性）
 manage_swap() {
     echo -e "${SUCCESS} 步骤5/7: 正在优化SWAP配置..."
-    swap_targets=$(swapon --show=NAME --noheadings)
+    swap_targets=$(swapon --show=NAME --noheadings 2>/dev/null)
     for target in $swap_targets; do
-        swapoff $target >/dev/null
+        swapoff $target >/dev/null 2>&1
         if [[ $target =~ ^/dev/mapper/ ]]; then
-            lvremove -fy ${target} >/dev/null
+            lvremove -fy ${target} >/dev/null 2>&1
         else
             rm -f $target
         fi
@@ -145,34 +145,34 @@ manage_swap() {
     fi
     
     if [[ $swap_size != 0 ]]; then
-        fallocate -l $swap_size /swapfile
+        fallocate -l $swap_size /swapfile >/dev/null 2>&1
         chmod 600 /swapfile
-        mkswap /swapfile >/dev/null
+        mkswap /swapfile >/dev/null 2>&1
         swapon /swapfile
         echo "/swapfile swap swap defaults 0 0" >> /etc/fstab
     fi
     progress_bar 3
 }
 
-# 6. 定时清理任务
+# 6. 日志清理任务（修复EOF）
 set_cronjob() {
     echo -e "${SUCCESS} 步骤6/7: 正在设置定时清理任务..."
-    cat << 'EOF' > /etc/cron.daily/system-cleanup
+    cat <<'EOF' > /etc/cron.daily/system-cleanup
 #!/bin/bash
-journalctl --vacuum-time=1d
+journalctl --vacuum-time=1d >/dev/null 2>&1
 find /var/log -type f -regex ".*\.gz$" -delete
 find /var/log -type f -exec truncate -s 0 {} \;
 if command -v apt &> /dev/null; then
-    apt clean
+    apt clean >/dev/null 2>&1
 elif command -v yum &> /dev/null; then
-    yum clean all
+    yum clean all >/dev/null 2>&1
 fi
 EOF
     chmod +x /etc/cron.daily/system-cleanup
     progress_bar 3
 }
 
-# 7. SSH配置
+# 7. SSH安全配置（完整实现）
 configure_ssh() {
     echo -e "${SUCCESS} 步骤7/7: 正在配置SSH安全设置..."
     mkdir -p /root/.ssh
@@ -184,7 +184,7 @@ configure_ssh() {
     
     sed -i 's/^#*\(PubkeyAuthentication\).*/\1 yes/' /etc/ssh/sshd_config
     sed -i 's/^#*\(PasswordAuthentication\).*/\1 no/' /etc/ssh/sshd_config
-    systemctl restart sshd >/dev/null
+    systemctl restart sshd >/dev/null 2>&1
     progress_bar 3
 }
 
