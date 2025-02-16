@@ -57,36 +57,20 @@ detect_distro() {
         echo -e "${RED}错误：无法检测Linux发行版"
         exit 100
     fi
-    echo -e "${BLUE}[系统检测] 发行版：${DISTRO}${NC}"
 }
 
 system_update() {
     case $DISTRO in
         ubuntu|debian)
-            if ! DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=120 -qq update; then
-                echo -e "${RED}APT源更新失败"
-                exit 200
-            fi
-            if ! DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=600 -qq -y --allow-downgrades --allow-remove-essential --allow-change-held-packages upgrade; then
-                echo -e "${RED}系统升级失败"
-                exit 200
-            fi
+            DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=120 -qq update >/dev/null
+            DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=600 -qq -y upgrade >/dev/null
             ;;
         centos|fedora|rhel)
-            if ! yum -y -q --nobest update; then
-                echo -e "${RED}YUM更新失败"
-                exit 200
-            fi
+            yum -y -q update >/dev/null
             ;;
         alpine)
-            if ! apk -q update; then
-                echo -e "${RED}APK更新失败"
-                exit 200
-            fi
-            if ! apk -q upgrade; then
-                echo -e "${RED}APK升级失败"
-                exit 200
-            fi
+            apk -q update >/dev/null
+            apk -q upgrade >/dev/null
             ;;
         *) exit 100 ;;
     esac
@@ -97,42 +81,33 @@ install_essentials() {
     
     case $DISTRO in
         ubuntu|debian)
-            if ! DEBIAN_FRONTEND=noninteractive apt-get -qq -y install $pkg_list; then
-                echo -e "${RED}组件安装失败"
-                exit 300
-            fi
+            DEBIAN_FRONTEND=noninteractive apt-get -qq -y install $pkg_list >/dev/null 2>&1
             ;;
         centos|fedora|rhel)
-            [[ "$DISTRO" == "centos" ]] && yum -y -q install epel-release
-            if ! yum -y -q install $pkg_list; then
-                echo -e "${RED}组件安装失败"
-                exit 300
-            fi
-            systemctl enable --now ufw
+            [[ "$DISTRO" == "centos" ]] && yum -y -q install epel-release >/dev/null
+            yum -y -q install $pkg_list >/dev/null 2>&1
+            systemctl enable --now ufw >/dev/null 2>&1
             ;;
         alpine)
-            if ! apk add -q $pkg_list; then
-                echo -e "${RED}组件安装失败"
-                exit 300
-            fi
-            rc-update add ufw default
+            apk add -q $pkg_list >/dev/null 2>&1
+            rc-update add ufw default >/dev/null 2>&1
             ;;
     esac
 }
 
 configure_timezone() {
     timedatectl set-timezone Asia/Shanghai 2>/dev/null || ln -sf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime
-    ntpdate -u pool.ntp.org >/dev/null || echo -e "${YELLOW}[警告] 时间同步失败"
+    ntpdate -u pool.ntp.org >/dev/null 2>&1
     echo "0 * * * * /usr/sbin/ntpdate pool.ntp.org >/dev/null" | crontab -
 }
 
 setup_firewall() {
-    ufw --force reset
-    ufw disable
+    ufw --force reset >/dev/null 2>&1
+    ufw disable >/dev/null 2>&1
 
     for port in 22 80 88 443 5555 8008 32767 32768; do
-        ufw allow $port/tcp
-        ufw allow $port/udp
+        ufw allow $port/tcp >/dev/null 2>&1
+        ufw allow $port/udp >/dev/null 2>&1
     done
 
     for subnet in \
@@ -149,16 +124,16 @@ setup_firewall() {
         2602:80d:1003::/112 \
         2602:80d:1004::/112
     do
-        ufw deny from $subnet
+        ufw deny from $subnet >/dev/null 2>&1
     done
 
-    echo "y" | ufw enable
+    echo "y" | ufw enable >/dev/null 2>&1
 }
 
 manage_swap() {
     if swapon --show | grep -q .; then
         swap_device=$(swapon --show=NAME --noheadings --raw | head -1)
-        swapoff "$swap_device"
+        swapoff "$swap_device" >/dev/null
         [[ -f "$swap_device" ]] && rm -f "$swap_device"
         sed -i "\|^$swap_device|d" /etc/fstab
     fi
@@ -176,10 +151,10 @@ manage_swap() {
         return
     fi
 
-    fallocate -l $swap_size /swapfile
+    fallocate -l $swap_size /swapfile >/dev/null
     chmod 600 /swapfile
-    mkswap /swapfile
-    swapon /swapfile
+    mkswap /swapfile >/dev/null
+    swapon /swapfile >/dev/null
     echo "/swapfile swap swap defaults 0 0" >> /etc/fstab
 }
 
@@ -193,7 +168,7 @@ find /var/log -type f \( -name "*.gz" -o -name "*.old" -o -name "*.log.*" \) -de
 [[ -f /etc/alpine-release ]] && apk cache clean
 EOF
 
-    chmod +x /usr/local/bin/logclean
+    chmod +x /usr/local/bin/logclean >/dev/null
     echo "0 0 * * * root /usr/local/bin/logclean" > /etc/cron.d/daily_logclean
     chmod 644 /etc/cron.d/daily_logclean
 }
@@ -213,7 +188,7 @@ harden_ssh() {
         done
     fi
 
-    systemctl restart sshd 2>/dev/null || systemctl restart ssh 2>/dev/null
+    systemctl restart sshd >/dev/null 2>&1 || systemctl restart ssh >/dev/null 2>&1
 }
 
 optimize_network() {
