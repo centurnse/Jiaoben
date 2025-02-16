@@ -7,16 +7,6 @@ success() { echo -e "\033[32m[✓] $1\033[0m"; }
 info() { echo -e "\033[34m[i] $1\033[0m"; }
 error() { echo -e "\033[31m[✗] $1\033[0m"; exit 1; }
 
-# 进度条函数
-progress_bar() {
-  echo -n "等待 "
-  for i in {3..1}; do
-    echo -n "$i..."
-    sleep 1
-  done
-  echo
-}
-
 # 1. 系统更新
 update_system() {
   info "开始系统更新..."
@@ -31,7 +21,6 @@ update_system() {
     error "不支持的包管理器"
   fi
   success "系统更新完成"
-  progress_bar
 }
 
 # 2. 安装必要组件
@@ -63,7 +52,6 @@ install_packages() {
     done
   fi
   success "组件安装完成"
-  progress_bar
 }
 
 # 3. 设置时区和时间同步
@@ -78,7 +66,6 @@ setup_time() {
     systemctl restart chronyd > /dev/null 2>&1
   fi
   success "时间设置完成"
-  progress_bar
 }
 
 # 4. 配置防火墙
@@ -119,7 +106,6 @@ deny from 2602:80d:1004::/112
 EOF
   ufw --force enable > /dev/null 2>&1
   success "防火墙配置完成"
-  progress_bar
 }
 
 # 5. 配置SWAP
@@ -151,7 +137,6 @@ setup_swap() {
   swapon /swapfile
   echo "/swapfile none swap sw 0 0" >> /etc/fstab
   success "SWAP配置完成 ($swap_size)"
-  progress_bar
 }
 
 # 6. 定时清理任务
@@ -163,23 +148,24 @@ setup_cleanup() {
 0 0 * * * (command -v apt-get > /dev/null && apt-get clean) || (command -v dnf > /dev/null && dnf clean all) || (command -v yum > /dev/null && yum clean all) > /dev/null 2>&1
 EOF
   success "定时任务设置完成"
-  progress_bar
 }
 
-# 7. 配置SSH
+# 7. 强化SSH配置
 setup_ssh() {
   info "配置SSH..."
   mkdir -p /root/.ssh
   chmod 700 /root/.ssh
-  echo "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKcz1QIr900sswIHYwkkdeYK0BSP7tufSe0XeyRq1Mpj centurnse@Centurnse-I" > /root/.ssh/id_ed25519.pub
-  touch /root/.ssh/authorized_keys
+  echo "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKcz1QIr900sswIHYwkkdeYK0BSP7tufSe0XeyRq1Mpj centurnse@Centurnse-I" > /root/.ssh/authorized_keys
   chmod 600 /root/.ssh/authorized_keys
-  grep -qxF "$(cat /root/.ssh/id_ed25519.pub)" /root/.ssh/authorized_keys || cat /root/.ssh/id_ed25519.pub >> /root/.ssh/authorized_keys
 
-  sed -i 's/^#*PasswordAuthentication.*/PasswordAuthentication no/' /etc/ssh/sshd_config
-  sed -i 's/^#*PubkeyAuthentication.*/PubkeyAuthentication yes/' /etc/ssh/sshd_config
+  # 强制使用密钥认证
+  sed -i '/^#*PasswordAuthentication/c\PasswordAuthentication no' /etc/ssh/sshd_config
+  sed -i '/^#*PubkeyAuthentication/c\PubkeyAuthentication yes' /etc/ssh/sshd_config
+  sed -i '/^#*ChallengeResponseAuthentication/c\ChallengeResponseAuthentication no' /etc/ssh/sshd_config
+  sed -i '/^#*UsePAM/c\UsePAM no' /etc/ssh/sshd_config
+  sed -i '/^#*PermitEmptyPasswords/c\PermitEmptyPasswords no' /etc/ssh/sshd_config
 
-  # 兼容不同发行版的服务名称
+  # 兼容不同服务名称
   if systemctl is-active ssh &> /dev/null; then
     systemctl restart ssh
   elif systemctl is-active sshd &> /dev/null; then
@@ -187,8 +173,7 @@ setup_ssh() {
   else
     error "无法找到SSH服务"
   fi
-  success "SSH配置完成"
-  progress_bar
+  success "SSH配置完成（已强制禁用密码登录）"
 }
 
 # 主执行流程
@@ -200,7 +185,8 @@ main() {
   setup_swap
   setup_cleanup
   setup_ssh
-  echo -e "\033[32m所有任务已完成！\033[0m"
+  echo -e "\n\033[32m所有任务已完成！\033[0m"
+  echo -e "\033[33m请务必确保已保存私钥，否则将无法登录服务器！\033[0m"
 }
 
 main
