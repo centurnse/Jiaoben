@@ -1,144 +1,190 @@
 #!/bin/bash
+set -eo pipefail
+trap 'echo -e "\033[1;31m错误: 脚本执行失败，请检查日志！\033[0m"; exit 1' ERR
 
-# 检查并安装 bc
-if ! command -v bc &> /dev/null; then
-    echo "bc 命令未找到，正在安装..."
-    if [ -f /etc/debian_version ]; then
-        apt update && apt install -y bc
-    elif [ -f /etc/redhat-release ]; then
-        yum install -y bc
-    elif [ -f /etc/centos-release ]; then
-        dnf install -y bc
-    else
-        echo "无法识别的Linux发行版，跳过 bc 安装"
-    fi
-fi
+# 美化输出颜色定义
+RED='\033[1;31m'
+GREEN='\033[1;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[1;34m'
+NC='\033[0m'
 
-# 隐藏命令执行进度
-function run_command {
-    "$@" > /dev/null 2>&1
-}
-
-# 显示进度条
-function progress_bar {
-    local duration=$1
-    local interval=0.1
-    local total_steps=$(echo "$duration/$interval" | bc)
-    echo -n "["
-    for ((i = 0; i <= total_steps; i++)); do
-        echo -n "#"
-        sleep $interval
+# 进度条函数
+countdown() {
+    echo -ne "${BLUE}等待3秒继续...  "
+    for i in {1..10}; do
+        echo -n "▇"
+        sleep 0.3
     done
-    echo "] 完成"
+    echo -e "${NC}\n"
 }
 
-# 1. 系统更新
-echo -e "\033[1;32m正在进行系统更新...\033[0m"
-if [ -f /etc/debian_version ]; then
-    run_command apt update && run_command apt upgrade -y
-elif [ -f /etc/redhat-release ]; then
-    run_command yum update -y
-elif [ -f /etc/centos-release ]; then
-    run_command dnf update -y
-else
-    echo "无法识别的Linux发行版，跳过更新"
-fi
-progress_bar 3
-
-# 2. 安装必要软件
-echo -e "\033[1;32m正在安装 wget, curl, vim, mtr, ufw, ntpdate, sudo, unzip, lvm2...\033[0m"
-if [ -f /etc/debian_version ]; then
-    run_command apt install -y wget curl vim mtr ufw ntpdate sudo unzip lvm2
-elif [ -f /etc/redhat-release ]; then
-    run_command yum install -y wget curl vim mtr ufw ntpdate sudo unzip lvm2
-elif [ -f /etc/centos-release ]; then
-    run_command dnf install -y wget curl vim mtr ufw ntpdate sudo unzip lvm2
-else
-    echo "无法识别的Linux发行版，跳过安装"
-fi
-progress_bar 3
-
-# 3. 设置时区为中国/上海并同步时间
-echo -e "\033[1;32m正在设置时区为中国/上海并同步时间...\033[0m"
-run_command timedatectl set-timezone Asia/Shanghai
-run_command timedatectl set-ntp true
-progress_bar 3
-
-# 4. 配置 ufw 防火墙规则并启用 ufw
-function add_ufw_rule {
-    local rule=$1
-    if ! ufw status | grep -q "$rule"; then
-        ufw -f $rule > /dev/null 2>&1
+# 系统更新
+update_system() {
+    echo -e "${YELLOW}[1/7] 正在更新系统...${NC}"
+    if grep -qi "ubuntu\|debian" /etc/os-release; then
+        apt update > /dev/null 2>&1
+        apt upgrade -y > /dev/null 2>&1
+    elif grep -qi "centos\|redhat" /etc/os-release; then
+        yum update -y > /dev/null 2>&1
+    else
+        echo -e "${RED}不支持的系统类型${NC}"
+        exit 1
     fi
+    echo -e "${GREEN}系统更新完成 ✔${NC}"
+    countdown
 }
 
-echo -e "\033[1;32m正在配置 ufw 防火墙规则...\033[0m"
+# 安装组件
+install_packages() {
+    echo -e "${YELLOW}[2/7] 正在安装必要组件...${NC}"
+    packages=("wget" "curl" "vim" "mtr" "ufw" "ntpdate" "sudo" "unzip" "lvm2")
+    for pkg in "${packages[@]}"; do
+        if ! command -v "$pkg" &> /dev/null; then
+            if grep -qi "ubuntu\|debian" /etc/os-release; then
+                apt install -y "$pkg" > /dev/null 2>&1
+            else
+                yum install -y "$pkg" > /dev/null 2>&1
+            fi
+        fi
+    done
+    echo -e "${GREEN}组件安装完成 ✔${NC}"
+    countdown
+}
 
-# 添加规则
-add_ufw_rule "allow 22/tcp"
-add_ufw_rule "allow 22/udp"
-add_ufw_rule "allow 80/tcp"
-add_ufw_rule "allow 80/udp"
-add_ufw_rule "allow 88/tcp"
-add_ufw_rule "allow 88/udp"
-add_ufw_rule "allow 443/tcp"
-add_ufw_rule "allow 443/udp"
-add_ufw_rule "allow 5555/tcp"
-add_ufw_rule "allow 5555/udp"
-add_ufw_rule "allow 8008/tcp"
-add_ufw_rule "allow 8008/udp"
-add_ufw_rule "allow 32767/tcp"
-add_ufw_rule "allow 32767/udp"
-add_ufw_rule "allow 32768/tcp"
-add_ufw_rule "allow 32768/udp"
-add_ufw_rule "deny from 162.142.125.0/24"
-add_ufw_rule "deny from 167.94.138.0/24"
-add_ufw_rule "deny from 167.94.145.0/24"
-add_ufw_rule "deny from 167.94.146.0/24"
-add_ufw_rule "deny from 167.248.133.0/24"
-add_ufw_rule "deny from 199.45.154.0/24"
-add_ufw_rule "deny from 199.45.155.0/24"
-add_ufw_rule "deny from 206.168.34.0/24"
-add_ufw_rule "deny from 2602:80d:1000:b0cc:e::/80"
-add_ufw_rule "deny from 2620:96:e000:b0cc:e::/80"
-add_ufw_rule "deny from 2602:80d:1003::/112"
-add_ufw_rule "deny from 2602:80d:1004::/112"
+# 设置时区
+set_timezone() {
+    echo -e "${YELLOW}[3/7] 正在配置时区...${NC}"
+    timedatectl set-timezone Asia/Shanghai > /dev/null 2>&1
+    ntpdate cn.pool.ntp.org > /dev/null 2>&1
+    echo "0 * * * * /usr/sbin/ntpdate cn.pool.ntp.org > /dev/null 2>&1" | crontab -
+    echo -e "${GREEN}时区配置完成 ✔${NC}"
+    countdown
+}
 
-# 启用ufw
-run_command ufw --force enable
-echo -e "\033[1;32m基础防护已添加完成！\033[0m"
-progress_bar 3
+# 防火墙配置
+setup_ufw() {
+    echo -e "${YELLOW}[4/7] 正在配置防火墙...${NC}"
+    ufw --force reset > /dev/null 2>&1
+    for port in 22 80 88 443 5555 8008 32767 32768; do
+        ufw allow "$port/tcp" > /dev/null 2>&1
+        ufw allow "$port/udp" > /dev/null 2>&1
+    done
+    for subnet in 162.142.125.0/24 167.94.138.0/24 167.94.145.0/24 167.94.146.0/24 \
+                   167.248.133.0/24 199.45.154.0/24 199.45.155.0/24 206.168.34.0/24 \
+                   2602:80d:1000:b0cc:e::/80 2620:96:e000:b0cc:e::/80 \
+                   2602:80d:1003::/112 2602:80d:1004::/112; do
+        ufw deny from "$subnet" > /dev/null 2>&1
+    done
+    echo "y" | ufw --force enable > /dev/null 2>&1
+    echo -e "${GREEN}防火墙配置完成 ✔${NC}"
+    countdown
+}
 
-# 5. 检查并配置 SWAP
-echo -e "\033[1;32m正在配置 SWAP...\033[0m"
-memory=$(free -m | awk '/Mem:/ {print $2}')
-disk_space=$(df / | awk 'NR==2 {print $4}')
-swap=$(swapon --show)
+# SWAP管理
+manage_swap() {
+    echo -e "${YELLOW}[5/7] 正在配置SWAP...${NC}"
+    mem=$(free -m | awk '/Mem:/ {print $2}')
+    disk=$(df -m / | awk 'NR==2 {print $4}')
 
-if [ -n "$swap" ]; then
-    run_command swapoff -a
-    run_command rm -f /swapfile
-fi
+    # 强制移除所有SWAP
+    {
+        swapoff -a >/dev/null 2>&1
+        lvswap=$(swapon --show=NAME,TYPE | awk '/dev/ {print $1}')
+        [ -n "$lvswap" ] && lvremove -f "$lvswap" >/dev/null 2>&1
+        sed -i '/swap/d' /etc/fstab
+        rm -f /swapfile
+        sync && sleep 1
+    } || {
+        echo -e "${RED}错误: 无法清理旧SWAP${NC}"
+        exit 1
+    }
 
-if [ "$memory" -le 1024 ] && [ "$disk_space" -gt 3072 ]; then
-    run_command fallocate -l 512M /swapfile
-elif [ "$memory" -gt 1024 ] && [ "$memory" -le 2048 ] && [ "$disk_space" -gt 10240 ]; then
-    run_command fallocate -l 1G /swapfile
-elif [ "$memory" -gt 2048 ] && [ "$memory" -le 4096 ] && [ "$disk_space" -gt 20480 ]; then
-    run_command fallocate -l 2G /swapfile
-elif [ "$memory" -gt 4096 ]; then
-    echo "内存大于4G，不分配SWAP"
-    exit 0
-fi
+    # 创建新SWAP
+    if [ "$mem" -le 1024 ] && [ "$disk" -ge 3072 ]; then
+        swap_size=512
+    elif [ "$mem" -gt 1024 ] && [ "$mem" -le 2048 ] && [ "$disk" -ge 10240 ]; then
+        swap_size=1024
+    elif [ "$mem" -gt 2048 ] && [ "$mem" -le 4096 ] && [ "$disk" -ge 20480 ]; then
+        swap_size=2048
+    else
+        echo -e "${BLUE}跳过SWAP创建${NC}"
+        return
+    fi
 
-run_command chmod 600 /swapfile
-run_command mkswap /swapfile
-run_command swapon /swapfile
-progress_bar 3
+    # 确保文件不存在
+    rm -f /swapfile
+    sync
 
-# 6. 创建定时任务清理日志
-echo -e "\033[1;32m正在创建定时任务清理日志...\033[0m"
-(crontab -l 2>/dev/null; echo "0 23 * * * /usr/bin/find /var/log -type f -exec rm -f {} \;") | crontab -
-progress_bar 3
+    # 使用fallocate避免文件占用
+    if ! fallocate -l ${swap_size}M /swapfile >/dev/null 2>&1; then
+        dd if=/dev/zero of=/swapfile bs=1M count=${swap_size} status=none conv=fsync
+    fi
 
-echo -e "\033[1;32m脚本执行完毕！\033[0m"
+    chmod 600 /swapfile
+    mkswap /swapfile >/dev/null
+    swapon /swapfile
+    echo "/swapfile swap swap defaults 0 0" >> /etc/fstab
+    echo -e "${GREEN}SWAP配置完成 ✔${NC}"
+    countdown
+}
+
+# 清理任务
+setup_cleanup() {
+    echo -e "${YELLOW}[6/7] 正在配置清理任务...${NC}"
+    echo "0 0 * * * journalctl --rotate && journalctl --vacuum-time=1s >/dev/null 2>&1" > /tmp/cronjob
+    echo "0 0 * * * find /var/log -type f -delete >/dev/null 2>&1" >> /tmp/cronjob
+    if grep -qi "ubuntu\|debian" /etc/os-release; then
+        echo "0 0 * * * apt clean >/dev/null 2>&1" >> /tmp/cronjob
+    else
+        echo "0 0 * * * yum clean all >/dev/null 2>&1" >> /tmp/cronjob
+    fi
+    crontab /tmp/cronjob
+    rm /tmp/cronjob
+    echo -e "${GREEN}清理任务配置完成 ✔${NC}"
+    countdown
+}
+
+# SSH配置
+setup_ssh() {
+    echo -e "${YELLOW}[7/7] 正在配置SSH...${NC}"
+    ssh_dir="/root/.ssh"
+    auth_file="$ssh_dir/authorized_keys"
+    pubkey="ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKcz1QIr900sswIHYwkkdeYK0BSP7tufSe0XeyRq1Mpj centurnse@Centurnse-I"
+
+    # 创建目录和文件
+    [ ! -d "$ssh_dir" ] && mkdir -p "$ssh_dir"
+    [ ! -f "$auth_file" ] && touch "$auth_file"
+
+    # 设置权限
+    chmod 700 "$ssh_dir"
+    chmod 600 "$auth_file"
+
+    # 生成密钥文件
+    echo "$pubkey" > "$ssh_dir/id_ed25519.pub"
+    if ! grep -q "$pubkey" "$auth_file"; then
+        echo "$pubkey" >> "$auth_file"
+    fi
+
+    # 修改SSH配置
+    sed -i 's/^#*PubkeyAuthentication.*/PubkeyAuthentication yes/' /etc/ssh/sshd_config
+    sed -i 's/^#*PasswordAuthentication.*/PasswordAuthentication no/' /etc/ssh/sshd_config
+    systemctl restart sshd > /dev/null 2>&1
+
+    echo -e "${GREEN}SSH配置完成 ✔${NC}"
+    countdown
+}
+
+# 主执行流程
+main() {
+    update_system
+    install_packages
+    set_timezone
+    setup_ufw
+    manage_swap
+    setup_cleanup
+    setup_ssh
+    echo -e "${GREEN}所有任务已完成 ✔${NC}"
+}
+
+main
