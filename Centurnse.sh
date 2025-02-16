@@ -16,15 +16,14 @@ error_exit() {
 
 trap 'error_exit $LINENO "$BASH_COMMAND"' ERR
 
-# 倒计时函数（修复显示问题）
+# 倒计时函数
 countdown() {
     local duration=$1
     for ((i=duration; i>0; i--)); do
-        # 使用ANSI转义序列清除整行
         echo -ne "\033[2K\r下一步操作将在 ${GREEN}$i${NC} 秒后继续..."
         sleep 1
     done
-    echo -ne "\033[2K\r"  # 清除倒计时行
+    echo -ne "\033[2K\r"
 }
 
 # 1. 系统更新
@@ -115,10 +114,9 @@ EOF
     countdown 3
 }
 
-# 5. SWAP管理（兼容性增强版）
+# 5. SWAP管理
 manage_swap() {
     echo -e "${SUCCESS} 步骤5/7: 正在优化SWAP配置..."
-    # 移除现有SWAP
     swap_targets=$(swapon --show=NAME --noheadings 2>/dev/null)
     for target in $swap_targets; do
         swapoff $target >/dev/null 2>&1
@@ -129,11 +127,9 @@ manage_swap() {
         fi
     done
     
-    # 计算内存和磁盘空间
     mem_total=$(free -m | awk '/Mem:/ {print $2}')
     disk_available=$(df -m / | awk 'NR==2 {print $4}')
     
-    # 计算SWAP大小
     swap_size=0
     if (( mem_total <= 1024 )) && (( disk_available >= 3072 )); then
         swap_size=512
@@ -143,7 +139,6 @@ manage_swap() {
         swap_size=2048
     fi
     
-    # 创建SWAP文件（全平台兼容）
     if (( swap_size > 0 )); then
         rm -f /swapfile
         dd if=/dev/zero of=/swapfile bs=1M count=$swap_size >/dev/null 2>&1
@@ -177,7 +172,7 @@ EOF
     countdown 3
 }
 
-# 7. SSH配置
+# 7. SSH配置（修复密码登录问题）
 configure_ssh() {
     echo -e "${SUCCESS} 步骤7/7: 正在配置SSH安全设置..."
     mkdir -p /root/.ssh
@@ -187,14 +182,29 @@ configure_ssh() {
     chmod 600 /root/.ssh/authorized_keys
     grep -qxF "$(cat /root/.ssh/id_ed25519.pub)" /root/.ssh/authorized_keys || cat /root/.ssh/id_ed25519.pub >> /root/.ssh/authorized_keys
     
-    sed -i 's/^#*\(PubkeyAuthentication\).*/\1 yes/' /etc/ssh/sshd_config
-    sed -i 's/^#*\(PasswordAuthentication\).*/\1 no/' /etc/ssh/sshd_config
+    # 修复SSH配置
+    sed -i '/^#*PasswordAuthentication/c\PasswordAuthentication no' /etc/ssh/sshd_config
+    sed -i '/^#*PubkeyAuthentication/c\PubkeyAuthentication yes' /etc/ssh/sshd_config
+    sed -i '/^#*ChallengeResponseAuthentication/c\ChallengeResponseAuthentication no' /etc/ssh/sshd_config
+    sed -i '/^#*UsePAM/c\UsePAM no' /etc/ssh/sshd_config
+    
+    # 检查配置有效性
+    if ! sshd -t; then
+        echo -e "${FAIL} SSH配置测试失败，正在恢复备份..."
+        cp /etc/ssh/sshd_config.bak /etc/ssh/sshd_config
+        systemctl restart sshd
+        error_exit $LINENO "SSH配置错误"
+    fi
+    
     systemctl restart sshd >/dev/null 2>&1
     countdown 3
 }
 
 # 主函数
 main() {
+    # 备份原始SSH配置
+    cp /etc/ssh/sshd_config /etc/ssh/sshd_config.bak
+    
     update_system
     install_components
     set_timezone
