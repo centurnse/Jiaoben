@@ -9,12 +9,11 @@ RED="\033[31m"
 YELLOW="\033[33m"
 NC="\033[0m"
 SUCCESS_LIST=()
-ERROR_LIST=()
 
 # 进度条函数
 countdown() {
-    echo -ne "${YELLOW}等待3秒...${NC}"
-    for i in {3..1}; do
+    echo -ne "${YELLOW}等待2秒...${NC}"
+    for i in {2..1}; do
         echo -ne "${YELLOW}\r等待${i}秒...${NC}"
         sleep 1
     done
@@ -38,13 +37,16 @@ system_update() {
         echo -e "${GREEN}检测到 Debian/Ubuntu 系统${NC}"
         apt-get -qq update > /dev/null
         DEBIAN_FRONTEND=noninteractive apt-get -qq -y upgrade > /dev/null
+        echo -e "${GREEN}系统更新完成${NC}"
     elif [ -f /etc/redhat-release ]; then
         echo -e "${GREEN}检测到 RHEL/CentOS 系统${NC}"
         yum -q -y update > /dev/null
+        echo -e "${GREEN}系统更新完成${NC}"
     elif [ -f /etc/alpine-release ]; then
         echo -e "${GREEN}检测到 Alpine 系统${NC}"
         apk update --quiet
         apk upgrade --quiet
+        echo -e "${GREEN}系统更新完成${NC}"
     else
         echo -e "${RED}不支持的Linux发行版${NC}"
         exit 1
@@ -73,6 +75,7 @@ install_components() {
         done
     fi
     
+    echo -e "${GREEN}必要组件安装完成${NC}"
     SUCCESS_LIST+=("必要组件安装完成")
     countdown
 }
@@ -84,11 +87,12 @@ time_config() {
     ntpdate -u pool.ntp.org > /dev/null
     (crontab -l 2>/dev/null | grep -v "ntpdate"; echo "0 * * * * /usr/sbin/ntpdate pool.ntp.org > /dev/null 2>&1") | crontab -
     
+    echo -e "${GREEN}时区设置和时间同步完成${NC}"
     SUCCESS_LIST+=("时区设置和时间同步完成")
     countdown
 }
 
-# 防火墙配置函数（完全修复版）
+# 防火墙配置函数
 configure_firewall() {
     trap 'error_handler "防火墙配置"' ERR
     
@@ -125,6 +129,7 @@ configure_firewall() {
     # 确保SSH连接不会中断
     ufw allow proto tcp from any to any port 22 > /dev/null 2>&1
     
+    echo -e "${GREEN}防火墙配置完成${NC}"
     SUCCESS_LIST+=("防火墙配置完成")
     countdown
 }
@@ -149,18 +154,23 @@ manage_swap() {
         mkswap /swapfile > /dev/null
         swapon /swapfile
         echo '/swapfile none swap sw 0 0' >> /etc/fstab
+        echo -e "${GREEN}已创建512MB SWAP${NC}"
     elif [ $mem_total -gt 1024 ] && [ $mem_total -le 2048 ] && [ $disk_space -ge 10240 ]; then
         fallocate -l 1G /swapfile
         chmod 600 /swapfile
         mkswap /swapfile > /dev/null
         swapon /swapfile
         echo '/swapfile none swap sw 0 0' >> /etc/fstab
+        echo -e "${GREEN}已创建1GB SWAP${NC}"
     elif [ $mem_total -gt 2048 ] && [ $mem_total -le 4096 ] && [ $disk_space -ge 20480 ]; then
         fallocate -l 2G /swapfile
         chmod 600 /swapfile
         mkswap /swapfile > /dev/null
         swapon /swapfile
         echo '/swapfile none swap sw 0 0' >> /etc/fstab
+        echo -e "${GREEN}已创建2GB SWAP${NC}"
+    else
+        echo -e "${GREEN}无需创建SWAP${NC}"
     fi
     
     SUCCESS_LIST+=("SWAP优化完成")
@@ -172,6 +182,7 @@ setup_log_clean() {
     trap 'error_handler "日志清理设置"' ERR
     (crontab -l 2>/dev/null | grep -v "logrotate"; echo "0 0 * * * /usr/sbin/logrotate -f /etc/logrotate.conf && journalctl --rotate --vacuum-time=1s && find /var/log -type f -name '*.log.*' -delete && apt-get clean >/dev/null 2>&1") | crontab -
     
+    echo -e "${GREEN}日志清理任务设置完成${NC}"
     SUCCESS_LIST+=("日志清理任务设置完成")
     countdown
 }
@@ -193,6 +204,7 @@ configure_ssh() {
     sed -i 's/^#*PubkeyAuthentication.*/PubkeyAuthentication yes/' /etc/ssh/sshd_config
     systemctl restart sshd > /dev/null 2>&1
     
+    echo -e "${GREEN}SSH安全配置完成${NC}"
     SUCCESS_LIST+=("SSH安全配置完成")
     countdown
 }
