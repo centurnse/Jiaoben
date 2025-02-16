@@ -19,18 +19,20 @@ display_progress() {
     echo -e "${GREEN}▶ 当前进度：$1/$2"
     echo -e "${BLUE}▷ 正在执行：${3}"
     echo -e "${YELLOW}▷ 后续任务：${4}"
+    echo -ne "   ${YELLOW}⏳ 将在3秒后进行下一步优化\033[K\r${NC}"
     echo -e "${CYAN}==================================================${NC}"
-    echo -ne "${YELLOW}⏳ 将在3秒后进行下一步优化\033[K\r${NC}"
+    echo
 }
 
 dynamic_countdown() {
     local seconds=3
     while (( seconds > 0 )); do
-        echo -ne "${YELLOW}⏳ 将在${seconds}秒后进行下一步优化\033[K\r${NC}"
+        echo -ne "\033[1A\033[2K"  # 上移一行并清除旧内容
+        echo -ne "   ${YELLOW}⏳ 将在${seconds}秒后进行下一步优化\033[K\r${NC}"
         sleep 1
         ((seconds--))
     done
-    echo -e "\033[2K"  # 清除整行
+    echo -ne "\033[1A\033[2K"  # 清除最后一行倒计时
 }
 
 # ==================== 核心功能 ====================
