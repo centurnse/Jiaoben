@@ -44,7 +44,7 @@ progress_countdown() {
         sleep 1
         echo -ne "\033[2K\r"
     done
-    echo -e "${NC}"
+    echo -e "${NC}\n"
 }
 
 success_alert() {
@@ -56,6 +56,7 @@ success_alert() {
 
 # 检测发行版
 detect_distro() {
+    echo -e "\n${BLUE}[信息] 开始系统检测...${NC}"
     if [[ -f /etc/os-release ]]; then
         source /etc/os-release
         DISTRO=$ID
@@ -68,30 +69,49 @@ detect_distro() {
         exit 1
     fi
     echo -e "${BLUE}[信息] 检测到系统：$DISTRO ${NC}"
+    sleep 1
 }
 
 # 1. 系统更新
 system_update() {
     ((current_step++))
     display_progress
+    echo -e "${BLUE}[信息] 开始系统更新...${NC}"
+    
     case $DISTRO in
         ubuntu|debian)
             export DEBIAN_FRONTEND=noninteractive
-            apt-get -qq update
-            apt-get -qq -y upgrade
+            if ! apt-get -o DPkg::Lock::Timeout=60 -qq update; then
+                echo -e "${RED}错误：APT源更新失败${NC}"
+                exit 1
+            fi
+            if ! apt-get -o DPkg::Lock::Timeout=60 -qq -y --allow-downgrades --allow-remove-essential --allow-change-held-packages upgrade; then
+                echo -e "${RED}错误：系统升级失败${NC}"
+                exit 1
+            fi
             ;;
         centos|fedora|rhel)
-            yum -y -q update
+            if ! yum -y -q --nobest update; then
+                echo -e "${RED}错误：YUM更新失败${NC}"
+                exit 1
+            fi
             ;;
         alpine)
-            apk -q update
-            apk -q upgrade
+            if ! apk -q update; then
+                echo -e "${RED}错误：APK更新失败${NC}"
+                exit 1
+            fi
+            if ! apk -q upgrade; then
+                echo -e "${RED}错误：APK升级失败${NC}"
+                exit 1
+            fi
             ;;
         *)
             echo -e "${RED}错误：不支持的发行版${NC}"
             exit 1
             ;;
     esac
+    
     success_alert "系统更新完成"
     progress_countdown
 }
@@ -100,19 +120,40 @@ system_update() {
 install_essentials() {
     ((current_step++))
     display_progress
+    echo -e "${BLUE}[信息] 开始安装组件...${NC}"
+    
+    pkg_list="wget curl vim mtr ufw ntpdate sudo unzip lvm2"
+    
     case $DISTRO in
         ubuntu|debian)
-            apt-get -qq -y install wget curl vim mtr ufw ntpdate sudo unzip lvm2
+            export DEBIAN_FRONTEND=noninteractive
+            if ! apt-get -o DPkg::Lock::Timeout=60 -qq -y install $pkg_list; then
+                echo -e "${RED}错误：组件安装失败${NC}"
+                exit 1
+            fi
             ;;
         centos|fedora|rhel)
-            yum -y -q install wget curl vim mtr ufw ntpdate sudo unzip lvm2
-            systemctl enable --now ufw
+            if [[ "$DISTRO" == "centos" ]]; then
+                if ! yum -y -q install epel-release; then
+                    echo -e "${RED}错误：EPEL源安装失败${NC}"
+                    exit 1
+                fi
+            fi
+            if ! yum -y -q install $pkg_list; then
+                echo -e "${RED}错误：组件安装失败${NC}"
+                exit 1
+            fi
+            systemctl enable --now ufw || true
             ;;
         alpine)
-            apk add -q wget curl vim mtr ufw ntpdate sudo unzip lvm2
-            rc-service ufw start
+            if ! apk add -q $pkg_list; then
+                echo -e "${RED}错误：组件安装失败${NC}"
+                exit 1
+            fi
+            rc-update add ufw default || true
             ;;
     esac
+    
     success_alert "组件安装完成"
     progress_countdown
 }
@@ -121,6 +162,8 @@ install_essentials() {
 configure_timezone() {
     ((current_step++))
     display_progress
+    echo -e "${BLUE}[信息] 设置上海时区...${NC}"
+    
     # 设置时区
     if command -v timedatectl &>/dev/null; then
         timedatectl set-timezone Asia/Shanghai
@@ -130,8 +173,13 @@ configure_timezone() {
     fi
     
     # 时间同步
-    ntpdate -u pool.ntp.org
+    echo -e "${BLUE}[信息] 同步网络时间...${NC}"
+    if ! ntpdate -u pool.ntp.org; then
+        echo -e "${YELLOW}[警告] 时间同步失败，继续执行...${NC}"
+    fi
+    
     # 定时任务
+    echo -e "${BLUE}[信息] 设置定时同步...${NC}"
     echo "0 * * * * /usr/sbin/ntpdate pool.ntp.org >/dev/null 2>&1" | crontab -
     
     success_alert "时区设置完成"
@@ -142,14 +190,28 @@ configure_timezone() {
 setup_firewall() {
     ((current_step++))
     display_progress
+    echo -e "${BLUE}[信息] 初始化防火墙配置...${NC}"
+    
+    # 确保UFW服务已启动
+    if systemctl is-active ufw &>/dev/null; then
+        systemctl restart ufw
+    else
+        systemctl start ufw || true
+    fi
+    
     # 重置防火墙
     ufw --force reset
+    ufw disable
     
     # 放行端口
     ports=(22 80 88 443 5555 8008 32767 32768)
     for port in "${ports[@]}"; do
-        ufw allow $port/tcp
-        ufw allow $port/udp
+        if ! ufw allow $port/tcp; then
+            echo -e "${YELLOW}[警告] 端口 $port/tcp 配置失败${NC}"
+        fi
+        if ! ufw allow $port/udp; then
+            echo -e "${YELLOW}[警告] 端口 $port/udp 配置失败${NC}"
+        fi
     done
     
     # 封禁子网
@@ -168,11 +230,14 @@ setup_firewall() {
         2602:80d:1004::/112
     )
     for subnet in "${deny_subnets[@]}"; do
-        ufw deny from "$subnet"
+        if ! ufw deny from "$subnet"; then
+            echo -e "${YELLOW}[警告] 子网 $subnet 封禁失败${NC}"
+        fi
     done
     
     # 启用防火墙
-    yes | ufw enable
+    echo "y" | ufw enable
+    
     success_alert "防火墙配置完成"
     progress_countdown
 }
@@ -181,9 +246,12 @@ setup_firewall() {
 manage_swap() {
     ((current_step++))
     display_progress
+    echo -e "${BLUE}[信息] 开始SWAP管理...${NC}"
+    
     # 移除现有SWAP
     if swapon --show | grep -q .; then
         swap_device=$(swapon --show=NAME --noheadings --raw | head -1)
+        echo -e "${YELLOW}[信息] 发现现有SWAP: $swap_device${NC}"
         swapoff "$swap_device"
         [[ -f "$swap_device" ]] && rm -f "$swap_device"
         sed -i "\|^$swap_device|d" /etc/fstab
@@ -192,6 +260,9 @@ manage_swap() {
     # 计算内存和磁盘
     mem_total=$(free -m | awk '/Mem:/ {print $2}')
     disk_space=$(df -m / | awk 'NR==2 {print $4}')
+
+    echo -e "内存总量: ${mem_total}MB"
+    echo -e "可用空间: ${disk_space}MB"
 
     # 创建新SWAP
     if (( mem_total <= 1024 && disk_space >= 3072 )); then
@@ -207,9 +278,18 @@ manage_swap() {
     fi
 
     # 创建swapfile
-    fallocate -l "$swap_size" /swapfile
+    echo -e "${BLUE}[信息] 创建 ${swap_size} SWAP文件...${NC}"
+    if ! fallocate -l "$swap_size" /swapfile; then
+        echo -e "${RED}错误：SWAP文件创建失败${NC}"
+        exit 1
+    fi
+    
     chmod 600 /swapfile
-    mkswap /swapfile >/dev/null
+    if ! mkswap /swapfile; then
+        echo -e "${RED}错误：SWAP初始化失败${NC}"
+        exit 1
+    fi
+    
     swapon /swapfile
     echo "/swapfile swap swap defaults 0 0" >> /etc/fstab
     
@@ -221,11 +301,14 @@ manage_swap() {
 configure_logclean() {
     ((current_step++))
     display_progress
+    echo -e "${BLUE}[信息] 配置日志清理...${NC}"
+    
     # 创建清理脚本
     cat > /usr/local/bin/logclean <<'EOF'
 #!/bin/bash
 journalctl --vacuum-time=1d
 find /var/log -type f \( -name "*.gz" -o -name "*.old" -o -name "*.log.*" \) -delete
+
 # 清理包缓存
 if [[ -f /etc/debian_version ]]; then
     apt-get clean
@@ -237,8 +320,9 @@ fi
 EOF
 
     chmod +x /usr/local/bin/logclean
+    
     # 设置定时任务
-    echo "0 0 * * * root /usr/local/bin/logclean" > /etc/cron.d/daily_logclean
+    echo "0 0 * * * root /usr/local/bin/logclean >/dev/null 2>&1" > /etc/cron.d/daily_logclean
     chmod 0644 /etc/cron.d/daily_logclean
     
     success_alert "日志清理配置完成"
@@ -249,6 +333,8 @@ EOF
 harden_ssh() {
     ((current_step++))
     display_progress
+    echo -e "${BLUE}[信息] 加固SSH配置...${NC}"
+    
     # 创建.ssh目录
     mkdir -p /root/.ssh
     chmod 700 /root/.ssh
@@ -257,17 +343,23 @@ harden_ssh() {
     pubkey="ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKcz1QIr900sswIHYwkkdeYK0BSP7tufSe0XeyRq1Mpj centurnse@Centurnse-I"
     keyfile="/root/.ssh/authorized_keys"
     
-    if ! grep -q "$pubkey" "$keyfile" 2>/dev/null; then
+    if [[ ! -f "$keyfile" ]]; then
+        touch "$keyfile"
+        chmod 600 "$keyfile"
+    fi
+    
+    if ! grep -q "$pubkey" "$keyfile"; then
         echo "$pubkey" >> "$keyfile"
     fi
-    chmod 600 "$keyfile"
 
     # 修改SSH配置
     sshd_config="/etc/ssh/sshd_config"
+    cp "$sshd_config" "$sshd_config.bak"
+    
     sed -i 's/^#*PasswordAuthentication.*/PasswordAuthentication no/' "$sshd_config"
     sed -i 's/^#*PubkeyAuthentication.*/PubkeyAuthentication yes/' "$sshd_config"
 
-    # 处理Ubuntu 24配置片段
+    # 处理Ubuntu24配置片段
     if [[ -d /etc/ssh/sshd_config.d ]]; then
         for f in /etc/ssh/sshd_config.d/*.conf; do
             [[ -f "$f" ]] && sed -i 's/PasswordAuthentication yes/PasswordAuthentication no/' "$f"
@@ -279,6 +371,8 @@ harden_ssh() {
         systemctl restart sshd
     elif systemctl is-active ssh &>/dev/null; then
         systemctl restart ssh
+    else
+        echo -e "${YELLOW}[警告] SSH服务未运行${NC}"
     fi
     
     success_alert "SSH加固完成"
@@ -289,6 +383,11 @@ harden_ssh() {
 optimize_network() {
     ((current_step++))
     display_progress
+    echo -e "${BLUE}[信息] 优化网络参数...${NC}"
+    
+    # 备份原配置
+    cp /etc/sysctl.conf /etc/sysctl.conf.bak
+    
     # TCP优化参数
     cat >> /etc/sysctl.conf <<'EOF'
 # TCP优化
@@ -319,8 +418,15 @@ net.ipv4.conf.default.forwarding = 1
 EOF
 
     # 应用配置
-    sysctl -p &>/dev/null
+    if ! sysctl -p; then
+        echo -e "${RED}错误：应用网络参数失败${NC}"
+        mv /etc/sysctl.conf.bak /etc/sysctl.conf
+        sysctl -p
+        exit 1
+    fi
+    
     sysctl --system &>/dev/null
+    
     success_alert "网络优化完成"
     progress_countdown
 }
