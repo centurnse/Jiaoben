@@ -19,20 +19,28 @@ display_progress() {
     echo -e "${GREEN}▶ 当前进度：$1/$2"
     echo -e "${BLUE}▷ 正在执行：${3}"
     echo -e "${YELLOW}▷ 后续任务：${4}"
-    echo -ne "   ${YELLOW}⏳ 将在3秒后进行下一步优化\033[K\r${NC}"
+    echo -e "   ${YELLOW}⏳ 倒计时进行中..."  # 固定倒计时行
     echo -e "${CYAN}==================================================${NC}"
-    echo
 }
 
 dynamic_countdown() {
     local seconds=3
     while (( seconds > 0 )); do
-        echo -ne "\033[1A\033[2K"  # 上移一行并清除旧内容
-        echo -ne "   ${YELLOW}⏳ 将在${seconds}秒后进行下一步优化\033[K\r${NC}"
+        # 定位到倒计时行并更新内容
+        echo -ne "\033[5A\033[2K"  # 上移5行清除旧内容
+        echo -e "${CYAN}=================================================="
+        echo " 自动化系统优化脚本"
+        echo -e "==================================================${NC}"
+        echo -e "${GREEN}▶ 当前进度：$current_step/$total_steps"
+        echo -e "${BLUE}▷ 正在执行：${steps[$step]}"
+        echo -e "${YELLOW}▷ 后续任务：${steps[$next_step]:-完成}"
+        echo -ne "   ${YELLOW}⏳ 将在 ${seconds} 秒后继续\033[K\r"
+        echo -e "${CYAN}==================================================${NC}"
         sleep 1
         ((seconds--))
     done
-    echo -ne "\033[1A\033[2K"  # 清除最后一行倒计时
+    # 清除倒计时显示
+    echo -ne "\033[5A\033[2K"
 }
 
 # ==================== 核心功能 ====================
@@ -244,11 +252,12 @@ main() {
             7) harden_ssh ;;
             8) optimize_network ;;
         esac
-
-        echo -e "${GREEN}[✓] ${steps[$step]} 完成"
     done
 
-    echo -e "\n${CYAN}=================================================="
+    clear
+    echo -e "${CYAN}=================================================="
+    echo " 自动化系统优化脚本"
+    echo -e "==================================================${NC}"
     echo -e "${GREEN}✔ 所有优化配置已完成！"
     echo -e "${CYAN}==================================================${NC}"
 }
