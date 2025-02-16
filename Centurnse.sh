@@ -31,7 +31,7 @@ update_system() {
 # 安装组件
 install_packages() {
     echo -e "${YELLOW}[2/7] 正在安装必要组件...${NC}"
-    packages=("wget" "curl" "vim" "mtr" "ufw" "unzip" "lvm2")
+    packages=("wget" "curl" "vim" "mtr" "ufw" "unzip" "lvm2" "ntpdate")
     for pkg in "${packages[@]}"; do
         if ! command -v "$pkg" &> /dev/null; then
             apt install -y "$pkg" > /dev/null 2>&1
