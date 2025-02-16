@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -eo pipefail
-trap 'echo -e "\033[31m[ERR] 在 $LINENO 行执行失败 | 最后命令：$BASH_COMMAND\033[0m"; exit 1' ERR
+trap 'echo -e "\033[31m[错误] 在 $LINENO 行执行失败 | 最后命令：$BASH_COMMAND\033[0m"; exit 1' ERR
 
 # 颜色定义
 RED='\033[31m'
@@ -40,9 +40,6 @@ progress_countdown() {
     echo
 }
 
-# 检查root权限
-[[ $EUID -ne 0 ]] && { echo -e "${RED}错误：必须使用root权限运行本脚本${NC}"; exit 1; }
-
 # 系统检测
 detect_distro() {
     if [[ -f /etc/os-release ]]; then
@@ -67,7 +64,7 @@ system_update() {
         ubuntu|debian)
             export DEBIAN_FRONTEND=noninteractive
             apt-get -o DPkg::Lock::Timeout=120 -qq update >/dev/null
-            apt-get -o DPkg::Lock::Timeout=600 -qq -y upgrade >/dev/null
+            apt-get -o DPkg::Lock::Timeout=600 -qq -y --allow-downgrades --allow-remove-essential --allow-change-held-packages upgrade >/dev/null
             ;;
         centos|fedora|rhel)
             yum -y -q update >/dev/null
@@ -97,9 +94,11 @@ install_essentials() {
         centos|fedora|rhel)
             [[ "$DISTRO" == "centos" ]] && yum -y -q install epel-release >/dev/null
             yum -y -q install $pkg_list >/dev/null
+            systemctl enable ufw >/dev/null 2>&1 || true
             ;;
         alpine)
             apk add -q $pkg_list >/dev/null
+            rc-update add ufw default >/dev/null 2>&1 || true
             ;;
     esac
     
@@ -113,7 +112,7 @@ configure_timezone() {
     display_progress
     
     timedatectl set-timezone Asia/Shanghai 2>/dev/null || ln -sf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime
-    ntpdate -u pool.ntp.org >/dev/null
+    ntpdate -u pool.ntp.org >/dev/null 2>&1
     echo "0 * * * * /usr/sbin/ntpdate pool.ntp.org >/dev/null 2>&1" | crontab -
     
     echo -e "${GREEN}[✓] 时区设置完成${NC}"
@@ -235,7 +234,7 @@ harden_ssh() {
         done
     fi
 
-    systemctl restart sshd 2>/dev/null || systemctl restart ssh 2>/dev/null
+    systemctl restart sshd >/dev/null 2>&1 || systemctl restart ssh >/dev/null 2>&1
     
     echo -e "${GREEN}[✓] SSH加固完成${NC}"
     progress_countdown
@@ -246,7 +245,9 @@ optimize_network() {
     ((current_step++))
     display_progress
     
-    cat >> /etc/sysctl.conf <<'EOF'
+    sysctl_conf="/etc/sysctl.conf"
+    grep -q "net.ipv4.tcp_congestion_control" $sysctl_conf || {
+        cat >> $sysctl_conf <<'EOF'
 net.ipv4.tcp_no_metrics_save=1
 net.ipv4.tcp_ecn=0
 net.ipv4.tcp_frto=0
@@ -270,6 +271,7 @@ net.ipv4.ip_forward=1
 net.ipv4.conf.all.forwarding=1
 net.ipv4.conf.default.forwarding=1
 EOF
+    }
 
     sysctl -p >/dev/null
     
@@ -279,6 +281,9 @@ EOF
 
 # 主执行流程
 main() {
+    # 检查root权限
+    [[ $EUID -ne 0 ]] && { echo -e "${RED}错误：必须使用root权限运行本脚本${NC}"; exit 1; }
+    
     detect_distro
     system_update
     install_essentials
