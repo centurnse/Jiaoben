@@ -19,18 +19,18 @@ display_progress() {
     echo -e "${GREEN}▶ 当前进度：$1/$2"
     echo -e "${BLUE}▷ 正在执行：${3}"
     echo -e "${YELLOW}▷ 后续任务：${4}"
-    progress_countdown
     echo -e "${CYAN}==================================================${NC}"
-    echo
+    echo -ne "${YELLOW}⏳ 将在3秒后进行下一步优化\033[K\r${NC}"
 }
 
-progress_countdown() {
-    echo -ne "   ${YELLOW}⏳ 倒计时：" 
-    for i in {3..1}; do
-        echo -ne "${i}秒 "
+dynamic_countdown() {
+    local seconds=3
+    while (( seconds > 0 )); do
+        echo -ne "${YELLOW}⏳ 将在${seconds}秒后进行下一步优化\033[K\r${NC}"
         sleep 1
+        ((seconds--))
     done
-    echo -e "\033[2K\r${NC}"
+    echo -e "\033[2K"  # 清除整行
 }
 
 # ==================== 核心功能 ====================
@@ -230,6 +230,7 @@ main() {
         current_step=$((step+1))
         next_step=$((current_step+1))
         display_progress $current_step $total_steps "${steps[$step]}" "${steps[$next_step]:-完成}"
+        dynamic_countdown
         
         case $current_step in
             1) system_update ;;
