@@ -19,16 +19,18 @@ display_progress() {
     echo -e "${GREEN}▶ 当前进度：$1/$2"
     echo -e "${BLUE}▷ 正在执行：${3}"
     echo -e "${YELLOW}▷ 后续任务：${4}"
+    progress_countdown
     echo -e "${CYAN}==================================================${NC}"
     echo
 }
 
 progress_countdown() {
+    echo -ne "   ${YELLOW}⏳ 倒计时：" 
     for i in {3..1}; do
-        echo -ne "${YELLOW}倒计时：${i} 秒\033[0K\r"
+        echo -ne "${i}秒 "
         sleep 1
     done
-    echo -e "${NC}"
+    echo -e "\033[2K\r${NC}"
 }
 
 # ==================== 核心功能 ====================
@@ -241,7 +243,6 @@ main() {
         esac
 
         echo -e "${GREEN}[✓] ${steps[$step]} 完成"
-        progress_countdown
     done
 
     echo -e "\n${CYAN}=================================================="
