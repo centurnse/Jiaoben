@@ -1,215 +1,218 @@
-#!/bin/bash
-set -eo pipefail
-trap 'echo -e "\033[31m[ERR] 在 $BASH_SOURCE 第 $LINENO 行发生错误\033[0m"; exit 1' ERR
+#!/usr/bin/env bash
+set -euo pipefail
+trap 'echo -e "\033[31mError at line $LINENO\033[0m"; exit 1' ERR
 
 # 美化输出函数
-print_success() { echo -e "\033[32m[✓] $1\033[0m"; }
-print_info() { echo -e "\033[34m[i] $1\033[0m"; }
-progress_countdown() {
-  echo -ne "\033[36m等待 "
-  for i in {3..1}; do
-    echo -n "$i..."
-    sleep 1
-  done
-  echo -e "\033[0m"
+RED='\033[31m'
+GREEN='\033[32m'
+YELLOW='\033[33m'
+BLUE='\033[34m'
+NC='\033[0m'
+sep() { printf "%s\n" "--------------------------------------------------"; }
+info() { echo -e "${BLUE}[INFO] $* ${NC}"; }
+success() { echo -e "${GREEN}[SUCCESS] $* ${NC}"; }
+error() { echo -e "${RED}[ERROR] $* ${NC}"; exit 1; }
+
+# 进度条函数
+progress_bar() {
+    for i in {3..1}; do
+        printf "\r下一步将在 ${YELLOW}%s${NC} 秒后继续..." "$i"
+        sleep 1
+    done
+    printf "\r%-40s\n" " "
 }
 
+# 检查root权限
+[[ $(id -u) -ne 0 ]] && error "必须使用root权限运行脚本"
+
+# 检测发行版
+detect_os() {
+    if [ -f /etc/os-release ]; then
+        . /etc/os-release
+        OS=$ID
+    else
+        error "无法检测操作系统"
+    fi
+}
+detect_os
+
 # 1. 系统更新
-system_update() {
-  print_info "正在执行系统更新..."
-  if command -v apt-get &>/dev/null; then
-    DEBIAN_FRONTEND=noninteractive apt-get -qq update > /dev/null
-    DEBIAN_FRONTEND=noninteractive apt-get -qq upgrade -y > /dev/null
-  elif command -v dnf &>/dev/null; then
-    dnf -q -y update > /dev/null
-  elif command -v yum &>/dev/null; then
-    yum -q -y update > /dev/null
-  else
-    echo -e "\033[31m[✗] 不支持的包管理器\033[0m"
-    exit 1
-  fi
-  print_success "系统更新完成"
-  progress_countdown
+update_system() {
+    info "开始系统更新..."
+    case $OS in
+        ubuntu|debian)
+            apt update >/dev/null && apt -y upgrade >/dev/null ;;
+        centos|fedora|rhel)
+            [ "$OS" = "centos" ] && yum -y update >/dev/null ;;
+        alpine)
+            apk update >/dev/null && apk upgrade >/dev/null ;;
+        *)
+            error "不支持的发行版: $OS" ;;
+    esac
+    success "系统更新完成"
+    progress_bar
 }
 
 # 2. 安装必要组件
-install_components() {
-  print_info "正在安装必要组件..."
-  declare -A pkg_map=(
-    ["apt"]="wget curl vim mtr ufw ntpdate sudo unzip lvm2"
-    ["yum"]="wget curl vim mtr ufw ntp sudo unzip lvm2"
-    ["dnf"]="wget curl vim mtr ufw ntp sudo unzip lvm2"
-  )
+install_packages() {
+    info "开始安装必要组件..."
+    pkg_list="wget curl vim mtr ufw ntpdate sudo unzip lvm2"
+    
+    case $OS in
+        ubuntu|debian)
+            apt install -y $pkg_list >/dev/null ;;
+        centos|fedora|rhel)
+            [ "$OS" = "centos" ] && yum install -y epel-release >/dev/null
+            yum install -y $pkg_list >/dev/null ;;
+        alpine)
+            apk add $pkg_list >/dev/null ;;
+    esac
+    success "组件安装完成"
+    progress_bar
+}
 
-  install_pkg() {
-    if command -v apt-get &>/dev/null; then
-      for pkg in ${pkg_map[apt]}; do
-        dpkg -s "$pkg" &>/dev/null || DEBIAN_FRONTEND=noninteractive apt-get -qq install -y "$pkg" > /dev/null
-      done
-    elif command -v dnf &>/dev/null; then
-      for pkg in ${pkg_map[dnf]}; do
-        rpm -q "$pkg" &>/dev/null || dnf -q -y install "$pkg" > /dev/null
-      done
-    elif command -v yum &>/dev/null; then
-      for pkg in ${pkg_map[yum]}; do
-        rpm -q "$pkg" &>/dev/null || yum -q -y install "$pkg" > /dev/null
-      done
+# 3. 时区设置
+setup_time() {
+    info "设置时区和时间同步..."
+    timedatectl set-timezone Asia/Shanghai || ln -sf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime
+    ntpdate pool.ntp.org >/dev/null
+    
+    # 每小时同步
+    echo "0 * * * * /usr/sbin/ntpdate pool.ntp.org >/dev/null 2>&1" | crontab -
+    systemctl restart cron >/dev/null 2>&1 || true
+    
+    success "时区设置完成"
+    progress_bar
+}
+
+# 4. 防火墙设置
+setup_ufw() {
+    info "配置防火墙规则..."
+    ufw disable >/dev/null
+    
+    # 添加允许规则
+    for port in 22 80 88 443 5555 8008 32767 32768; do
+        ufw allow ${port}/tcp >/dev/null
+        ufw allow ${port}/udp >/dev/null
+    done
+    
+    # 添加拒绝规则
+    for subnet in 162.142.125.0/24 167.94.138.0/24 167.94.145.0/24 167.94.146.0/24 \
+                  167.248.133.0/24 199.45.154.0/24 199.45.155.0/24 206.168.34.0/24 \
+                  2602:80d:1000:b0cc:e::/80 2620:96:e000:b0cc:e::/80 \
+                  2602:80d:1003::/112 2602:80d:1004::/112; do
+        ufw deny from $subnet >/dev/null
+    done
+    
+    echo "y" | ufw enable >/dev/null
+    success "防火墙配置完成"
+    progress_bar
+}
+
+# 5. SWAP管理
+setup_swap() {
+    info "配置SWAP..."
+    # 检测现有SWAP
+    if swapon --show | grep -q .; then
+        swap_device=$(swapon --show=NAME --noheadings --raw | head -1)
+        swapoff "$swap_device"
+        [ -f "$swap_device" ] && rm -f "$swap_device"
+        sed -i "\|^$swap_device|d" /etc/fstab
     fi
-  }
 
-  install_pkg
-  print_success "组件安装完成"
-  progress_countdown
-}
+    # 计算内存和磁盘空间
+    mem_total=$(free -m | awk '/Mem:/ {print $2}')
+    disk_space=$(df -m / | awk 'NR==2 {print $4}')
 
-# 3. 时间配置
-configure_time() {
-  print_info "正在配置时区和时间同步..."
-  timedatectl set-timezone Asia/Shanghai > /dev/null
-  if command -v ntpdate &>/dev/null; then
-    ntpdate -u pool.ntp.org > /dev/null
-    (crontab -l 2>/dev/null; echo "0 * * * * /usr/sbin/ntpdate pool.ntp.org >/dev/null 2>&1") | crontab -
-  else
-    systemctl enable --now chronyd > /dev/null
-  fi
-  print_success "时间配置完成"
-  progress_countdown
-}
-
-# 4. 防火墙配置
-configure_firewall() {
-  print_info "正在配置防火墙..."
-  ufw --force reset > /dev/null
-  while read -r rule; do
-    ufw $rule > /dev/null
-  done << EOF
-allow 22/tcp
-allow 22/udp
-allow 80/tcp
-allow 80/udp
-allow 88/tcp
-allow 88/udp
-allow 443/tcp
-allow 443/udp
-allow 5555/tcp
-allow 5555/udp
-allow 8008/tcp
-allow 8008/udp
-allow 32767/tcp
-allow 32767/udp
-allow 32768/tcp
-allow 32768/udp
-deny from 162.142.125.0/24
-deny from 167.94.138.0/24
-deny from 167.94.145.0/24
-deny from 167.94.146.0/24
-deny from 167.248.133.0/24
-deny from 199.45.154.0/24
-deny from 199.45.155.0/24
-deny from 206.168.34.0/24
-deny from 2602:80d:1000:b0cc:e::/80
-deny from 2620:96:e000:b0cc:e::/80
-deny from 2602:80d:1003::/112
-deny from 2602:80d:1004::/112
-EOF
-  ufw --force enable > /dev/null
-  print_success "防火墙配置完成"
-  progress_countdown
-}
-
-# 5. SWAP配置
-configure_swap() {
-  print_info "正在配置SWAP..."
-  swapoff -a > /dev/null
-  if lsblk -o FSTYPE | grep -q swap; then
-    lvremove -y $(lsblk -o NAME,FSTYPE | grep swap | awk '{print $1}') > /dev/null 2>&1 || true
-  fi
-  rm -f /swapfile*
-
-  mem_total=$(free -m | awk '/Mem:/ {print $2}')
-  disk_space=$(df -m / | awk 'NR==2 {print $4}')
-
-  declare -A swap_rules=(
-    ["512"]="1024 3072"
-    ["1024"]="1025 10240"
-    ["2048"]="2049 20480"
-  )
-
-  for size in "${!swap_rules[@]}"; do
-    IFS=' ' read -r min_mem min_disk <<< "${swap_rules[$size]}"
-    if (( mem_total <= min_mem && disk_space >= min_disk )); then
-      fallocate -l "${size}M" /swapfile > /dev/null
-      chmod 600 /swapfile
-      mkswap /swapfile > /dev/null
-      swapon /swapfile
-      echo "/swapfile none swap sw 0 0" >> /etc/fstab
-      print_success "已创建 ${size}MB SWAP"
-      progress_countdown
-      return
+    # 创建新SWAP
+    if (( mem_total <= 1024 )) && (( disk_space >= 3072 )); then
+        swap_size=512M
+    elif (( mem_total > 1024 && mem_total <= 2048 )) && (( disk_space >= 10240 )); then
+        swap_size=1G
+    elif (( mem_total > 2048 && mem_total <= 4096 )) && (( disk_space >= 20480 )); then
+        swap_size=2G
+    else
+        success "未创建SWAP"
+        progress_bar
+        return
     fi
-  done
-  print_info "跳过SWAP创建"
-  progress_countdown
+
+    fallocate -l $swap_size /swapfile
+    chmod 600 /swapfile
+    mkswap /swapfile >/dev/null
+    swapon /swapfile
+    echo "/swapfile swap swap defaults 0 0" >> /etc/fstab
+    
+    success "SWAP配置完成"
+    progress_bar
 }
 
-# 6. 清理任务
+# 6. 日志清理任务
 setup_cleanup() {
-  print_info "正在设置清理任务..."
-  cat << EOF | crontab -
-0 0 * * * journalctl --vacuum-time=1d >/dev/null 2>&1
-0 0 * * * find /var/log -type f -name "*.log" -exec truncate -s 0 {} \; >/dev/null 2>&1
-0 0 * * * (command -v apt-get >/dev/null && apt-get clean) || (command -v dnf >/dev/null && dnf clean all) || (command -v yum >/dev/null && yum clean all) >/dev/null 2>&1
+    info "设置清理任务..."
+    cat > /usr/local/bin/cleanup.sh <<'EOF'
+#!/bin/bash
+journalctl --vacuum-time=1d
+find /var/log -type f -regex ".*\.gz$" -delete
+find /var/log -type f -regex ".*\.[0-9]$" -delete
+case $(id -u) in
+    0) 
+        [ -f /etc/debian_version ] && apt clean
+        [ -f /etc/redhat-release ] && yum clean all
+        [ -f /etc/alpine-release ] && apk cache clean
+        ;;
+esac
 EOF
-  print_success "清理任务设置完成"
-  progress_countdown
+
+    chmod +x /usr/local/bin/cleanup.sh
+    echo "0 0 * * * root /usr/local/bin/cleanup.sh" > /etc/cron.d/daily_cleanup
+    
+    success "清理任务设置完成"
+    progress_bar
 }
 
 # 7. SSH配置
-configure_ssh() {
-  print_info "正在配置SSH..."
-  ssh_dir="/root/.ssh"
-  auth_file="$ssh_dir/authorized_keys"
-  pubkey="ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKcz1QIr900sswIHYwkkdeYK0BSP7tufSe0XeyRq1Mpj centurnse@Centurnse-I"
+setup_ssh() {
+    info "配置SSH..."
+    mkdir -p /root/.ssh
+    chmod 700 /root/.ssh
+    touch /root/.ssh/authorized_keys
+    chmod 600 /root/.ssh/authorized_keys
 
-  # 创建或修复目录
-  mkdir -p "$ssh_dir"
-  chmod 700 "$ssh_dir"
-  
-  # 处理密钥文件
-  echo "$pubkey" > "$ssh_dir/id_ed25519.pub"
-  touch "$auth_file"
-  chmod 600 "$auth_file"
-  grep -qxF "$pubkey" "$auth_file" || echo "$pubkey" >> "$auth_file"
+    # 生成密钥
+    key_file="/root/.ssh/id_ed25519.pub"
+    echo "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKcz1QIr900sswIHYwkkdeYK0BSP7tufSe0XeyRq1Mpj centurnse@Centurnse-I" > $key_file
+    grep -qFf $key_file /root/.ssh/authorized_keys || cat $key_file >> /root/.ssh/authorized_keys
 
-  # 配置SSH服务
-  sed -i '/^#*PasswordAuthentication/c\PasswordAuthentication no' /etc/ssh/sshd_config
-  sed -i '/^#*PubkeyAuthentication/c\PubkeyAuthentication yes' /etc/ssh/sshd_config
+    # 配置SSHD
+    sed -i 's/^#*PasswordAuthentication.*/PasswordAuthentication no/' /etc/ssh/sshd_config
+    sed -i 's/^#*PubkeyAuthentication.*/PubkeyAuthentication yes/' /etc/ssh/sshd_config
 
-  # Ubuntu 24+特殊处理
-  if [[ -f /etc/os-release ]] && grep -q 'VERSION_ID="24' /etc/os-release; then
-    find /etc/ssh/sshd_config.d/ -name '*.conf' -exec sed -i '/^#*PasswordAuthentication/c\PasswordAuthentication no' {} \;
-  fi
+    # 处理Ubuntu24+配置
+    if [ -d /etc/ssh/sshd_config.d ]; then
+        for f in /etc/ssh/sshd_config.d/*.conf; do
+            [ -f "$f" ] && sed -i 's/PasswordAuthentication yes/PasswordAuthentication no/' "$f"
+        done
+    fi
 
-  # 重启服务
-  if systemctl is-active ssh &>/dev/null; then
-    systemctl restart ssh
-  elif systemctl is-active sshd &>/dev/null; then
-    systemctl restart sshd
-  fi
-  print_success "SSH配置完成"
-  progress_countdown
+    systemctl restart sshd >/dev/null || systemctl restart ssh >/dev/null
+    
+    success "SSH配置完成"
+    progress_bar
 }
 
 # 主执行流程
 main() {
-  system_update
-  install_components
-  configure_time
-  configure_firewall
-  configure_swap
-  setup_cleanup
-  configure_ssh
-  echo -e "\n\033[32m[+] 所有任务已完成！\033[0m"
+    sep
+    update_system
+    install_packages
+    setup_time
+    setup_ufw
+    setup_swap
+    setup_cleanup
+    setup_ssh
+    sep
+    success "所有配置已完成！"
 }
 
 main
