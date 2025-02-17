@@ -169,7 +169,7 @@ harden_ssh() {
 
     if [[ -d /etc/ssh/sshd_config.d ]]; then
         for f in /etc/ssh/sshd_config.d/*.conf; do
-            sed -i 's/PasswordAuthentication yes/PasswordAuthentication no/' "$f"
+            [[ -f "$f" ]] && sed -i 's/PasswordAuthentication yes/PasswordAuthentication no/' "$f"
         done
     fi
 
