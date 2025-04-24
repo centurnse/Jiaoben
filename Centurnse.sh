@@ -15,34 +15,36 @@ countdown() {
     echo
 }
 
-# SSH安全配置函数（仅修改PasswordAuthentication）
+# SSH安全配置函数
 secure_ssh() {
     echo ">>> 正在配置SSH安全设置 <<<"
     local sshd_config="/etc/ssh/sshd_config"
+    [ -f "$sshd_config" ] || { echo "SSH配置文件不存在"; return 1; }
+    
+    # 备份原始配置
+    cp "$sshd_config" "${sshd_config}.bak-$(date +%Y%m%d%H%M%S)"
     
     # 主配置文件设置
-    if [ -f "$sshd_config" ]; then
-        cp "$sshd_config" "${sshd_config}.bak-$(date +%Y%m%d%H%M%S)"
-        sed -i '/^#*PasswordAuthentication/c\PasswordAuthentication no' "$sshd_config"
-        sed -i '/^#*PubkeyAuthentication/c\PubkeyAuthentication yes' "$sshd_config"
-        sed -i '/^#*Port/c\Port 2333' "$sshd_config"
-    fi
+    sed -i '/^#*PasswordAuthentication/c\PasswordAuthentication no' "$sshd_config"
+    sed -i '/^#*PubkeyAuthentication/c\PubkeyAuthentication yes' "$sshd_config"
+    sed -i '/^#*Port/c\Port 2333' "$sshd_config"
+    sed -i '/^#*PermitRootLogin/c\PermitRootLogin prohibit-password' "$sshd_config"
 
     # 仅处理sshd_config.d中的PasswordAuthentication
     if [ -d "/etc/ssh/sshd_config.d" ]; then
         find /etc/ssh/sshd_config.d -name "*.conf" -type f | while read conf; do
             echo "处理配置文件：$conf"
-            [ -f "$conf" ] && {
-                cp "$conf" "${conf}.bak"
-                sed -i '/^#*PasswordAuthentication/c\PasswordAuthentication no' "$conf"
-            }
+            cp "$conf" "${conf}.bak"
+            sed -i '/^#*PasswordAuthentication/c\PasswordAuthentication no' "$conf"
         done
     fi
 
     # 根据服务名称重启SSH
     if systemctl list-unit-files --type=service | grep -q "^sshd.service"; then
+        echo "检测到sshd服务，正在重启..."
         systemctl restart sshd
     else
+        echo "检测到ssh服务，正在重启..."
         systemctl restart ssh
     fi
 }
@@ -81,35 +83,36 @@ case ${choice^^} in
         # 处理LVM SWAP
         if command -v lvm >/dev/null; then
             lv_path=$(lvs -o lv_path,vg_name,lv_name | grep -i swap | awk '{print $1}')
-            [ -n "$lv_path" ] && {
+            if [ -n "$lv_path" ]; then
                 lvchange -an "$lv_path" >/dev/null 2>&1
                 lvremove -f "$lv_path" >/dev/null 2>&1
                 root_lv=$(lvs -o lv_path,vg_name,lv_name | grep -i root | awk '{print $1}')
-                [ -n "$root_lv" ] && {
+                if [ -n "$root_lv" ]; then
                     lvextend -l +100%FREE "$root_lv" >/dev/null 2>&1
                     resize2fs "$root_lv" >/dev/null 2>&1
-                }
-            }
+                fi
+            fi
         fi
         
         update-initramfs -u -k all >/dev/null 2>&1
         
         read -p "是否建立新的SWAP？（输入YES继续，输入NO跳过）: " swap_choice
         if [[ "${swap_choice^^}" == "YES" ]]; then
-            while :; do
-                read -p "请输入SWAP大小（GB，0-9999）: " swap_size
-                if [[ $swap_size =~ ^[0-9]+$ ]] && [ $swap_size -le 9999 ]; then
-                    echo "正在配置 ${swap_size}GB 的SWAP..."
+            while true; do
+                read -p "请输入SWAP大小（GB，最小1GB，最大9999GB）: " swap_size
+                if [[ $swap_size =~ ^[0-9]+$ ]] && [ $swap_size -ge 1 ] && [ $swap_size -le 9999 ]; then
+                    echo "正在配置 ${swap_size}GB 的SWAP（这可能需要几分钟）..."
                     swapoff -a >/dev/null 2>&1
                     rm -f /swapfile >/dev/null 2>&1
-                    dd if=/dev/zero of=/swapfile bs=1G count=$swap_size status=progress
+                    # 使用更安全的方式创建大文件
+                    fallocate -l ${swap_size}G /swapfile || dd if=/dev/zero of=/swapfile bs=1M count=$(($swap_size * 1024)) status=progress
                     chmod 600 /swapfile
-                    mkswap /swapfile >/dev/null
-                    swapon /swapfile
+                    mkswap /swapfile >/dev/null || { echo "SWAP文件创建失败，请检查磁盘空间"; exit 1; }
+                    swapon /swapfile || { echo "SWAP激活失败，请检查日志"; exit 1; }
                     echo "/swapfile none swap sw 0 0" >> /etc/fstab
                     break
                 else
-                    echo "输入无效，请重新输入数字（0-9999）"
+                    echo "输入无效，请输入1-9999之间的整数"
                 fi
             done
         fi
@@ -179,6 +182,10 @@ case ${choice^^} in
             "199.45.154.0/24"
             "199.45.155.0/24"
             "206.168.34.0/24"
+            "2602:80d:1000:b0cc:e::/80"
+            "2620:96:e000:b0cc:e::/80"
+            "2602:80d:1003::/112"
+            "2602:80d:1004::/112"
         )
         
         for ip in "${blocked_ips[@]}"; do
@@ -194,29 +201,35 @@ case ${choice^^} in
         rm -f /swapfile >/dev/null 2>&1
         sed -i '/swapfile/d' /etc/fstab
 
-        total_mem=$(free -m | awk '/Mem:/ {print $2}')
-        free_space=$(df -m / | awk 'NR==2 {print $4}')
+        total_mem=$(free -m | awk '/Mem:/ {print $2}' | tr -cd '0-9')
+        free_space=$(df -m / | awk 'NR==2 {print $4}' | tr -cd '0-9')
+        
+        total_mem=${total_mem:-0}
+        free_space=${free_space:-0}
 
         if [ "$total_mem" -lt 512 ] && [ "$free_space" -gt 5120 ]; then
+            swap_size=512
             echo "自动配置 512MB SWAP..."
-            dd if=/dev/zero of=/swapfile bs=1M count=512 status=progress
+            fallocate -l ${swap_size}M /swapfile || dd if=/dev/zero of=/swapfile bs=1M count=$swap_size status=progress
             chmod 600 /swapfile
-            mkswap /swapfile >/dev/null
-            swapon /swapfile
+            mkswap /swapfile >/dev/null || { echo "SWAP文件创建失败"; exit 1; }
+            swapon /swapfile || { echo "SWAP激活失败"; exit 1; }
             echo "/swapfile none swap sw 0 0" >> /etc/fstab
         elif [ "$total_mem" -ge 512 ] && [ "$total_mem" -lt 1024 ] && [ "$free_space" -gt 8192 ]; then
+            swap_size=1024
             echo "自动配置 1024MB SWAP..."
-            dd if=/dev/zero of=/swapfile bs=1M count=1024 status=progress
+            fallocate -l ${swap_size}M /swapfile || dd if=/dev/zero of=/swapfile bs=1M count=$swap_size status=progress
             chmod 600 /swapfile
-            mkswap /swapfile >/dev/null
-            swapon /swapfile
+            mkswap /swapfile >/dev/null || { echo "SWAP文件创建失败"; exit 1; }
+            swapon /swapfile || { echo "SWAP激活失败"; exit 1; }
             echo "/swapfile none swap sw 0 0" >> /etc/fstab
         elif [ "$total_mem" -ge 1024 ] && [ "$total_mem" -lt 2048 ] && [ "$free_space" -gt 10240 ]; then
+            swap_size=1024
             echo "自动配置 1024MB SWAP..."
-            dd if=/dev/zero of=/swapfile bs=1M count=1024 status=progress
+            fallocate -l ${swap_size}M /swapfile || dd if=/dev/zero of=/swapfile bs=1M count=$swap_size status=progress
             chmod 600 /swapfile
-            mkswap /swapfile >/dev/null
-            swapon /swapfile
+            mkswap /swapfile >/dev/null || { echo "SWAP文件创建失败"; exit 1; }
+            swapon /swapfile || { echo "SWAP激活失败"; exit 1; }
             echo "/swapfile none swap sw 0 0" >> /etc/fstab
         else
             echo "内存充足，跳过SWAP配置"
