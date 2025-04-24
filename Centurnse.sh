@@ -15,26 +15,32 @@ countdown() {
     echo
 }
 
+# SSH安全配置函数
 secure_ssh() {
+    echo "正在配置SSH安全设置..."
     local sshd_config="/etc/ssh/sshd_config"
+    [ -f "$sshd_config" ] || { echo "SSH配置文件不存在"; return 1; }
+    
+    # 备份原始配置
     cp "$sshd_config" "${sshd_config}.bak-$(date +%Y%m%d%H%M%S)"
     
-    # 处理主配置文件
-    sed -i '/^#*PasswordAuthentication/c\PasswordAuthentication no' $sshd_config
-    sed -i '/^#*PubkeyAuthentication/c\PubkeyAuthentication yes' $sshd_config
-    sed -i '/^#*ChallengeResponseAuthentication/c\ChallengeResponseAuthentication no' $sshd_config
-    sed -i '/^#*Port/c\Port 2333' $sshd_config
+    # 主配置文件设置
+    sed -i '/^#*PasswordAuthentication/c\PasswordAuthentication no' "$sshd_config"
+    sed -i '/^#*PubkeyAuthentication/c\PubkeyAuthentication yes' "$sshd_config"
+    sed -i '/^#*ChallengeResponseAuthentication/c\ChallengeResponseAuthentication no' "$sshd_config"
+    sed -i '/^#*Port/c\Port 2333' "$sshd_config"
+    sed -i '/^#*PermitRootLogin/c\PermitRootLogin prohibit-password' "$sshd_config"
 
-    # 处理sshd_config.d目录
+    # 处理可能存在的覆盖配置
     if [ -d "/etc/ssh/sshd_config.d" ]; then
         find /etc/ssh/sshd_config.d -name "*.conf" -type f | while read conf; do
-            echo "处理配置文件：$conf"
+            echo "处理覆盖配置文件：$conf"
             cp "$conf" "${conf}.bak"
-            sed -i -E '/^#*PasswordAuthentication/c\PasswordAuthentication no' "$conf"
+            sed -i '/^#*PasswordAuthentication/c\PasswordAuthentication no' "$conf"
         done
     fi
 
-    # 根据版本重载服务
+    # 重启SSH服务
     if systemctl is-active sshd &>/dev/null; then
         systemctl restart sshd
     else
@@ -53,35 +59,37 @@ echo
 case ${choice^^} in
     A)
         echo "开始配置物理服务器..."
-        # ① Dedicated Server Configuration
         
         # Step 1: Update system
         echo "[1/5] 正在更新系统..."
         apt-get update -qq >/dev/null
-        apt-get upgrade -y -qq >/dev/null
+        DEBIAN_FRONTEND=noninteractive apt-get upgrade -y -qq >/dev/null
         countdown
         
         # Step 2: Install packages
         echo "[2/5] 正在安装基础组件..."
-        apt-get install -y -qq sudo curl wget mtr >/dev/null
+        DEBIAN_FRONTEND=noninteractive apt-get install -y -qq sudo curl wget mtr >/dev/null
         countdown
         
         # Step 3: Swap management
         echo "[3/5] 正在处理SWAP..."
-        swapoff -a
+        swapoff -a >/dev/null 2>&1
         sed -i '/swap/d' /etc/fstab
+        
+        # 处理LVM SWAP
         if command -v lvm >/dev/null; then
             lv_path=$(lvs -o lv_path,vg_name,lv_name | grep -i swap | awk '{print $1}')
             if [ -n "$lv_path" ]; then
-                lvchange -an $lv_path >/dev/null 2>&1
-                lvremove -f $lv_path >/dev/null 2>&1
+                lvchange -an "$lv_path" >/dev/null 2>&1
+                lvremove -f "$lv_path" >/dev/null 2>&1
                 root_lv=$(lvs -o lv_path,vg_name,lv_name | grep -i root | awk '{print $1}')
                 if [ -n "$root_lv" ]; then
-                    lvextend -l +100%FREE $root_lv >/dev/null 2>&1
-                    resize2fs $root_lv >/dev/null 2>&1
+                    lvextend -l +100%FREE "$root_lv" >/dev/null 2>&1
+                    resize2fs "$root_lv" >/dev/null 2>&1
                 fi
             fi
         fi
+        
         update-initramfs -u -k all >/dev/null 2>&1
         
         read -p "是否建立新的SWAP？（Type YES to continue，Type NO to next setp）: " swap_choice
@@ -89,8 +97,8 @@ case ${choice^^} in
             while true; do
                 read -p "请输入SWAP大小（GB，0-9999）: " swap_size
                 if [[ $swap_size =~ ^[0-9]+$ ]] && [ $swap_size -le 9999 ]; then
-                    swapoff -a
-                    rm -f /swapfile
+                    swapoff -a >/dev/null 2>&1
+                    rm -f /swapfile >/dev/null 2>&1
                     dd if=/dev/zero of=/swapfile bs=1M count=$(($swap_size * 1024)) status=progress
                     chmod 600 /swapfile
                     mkswap /swapfile >/dev/null
@@ -106,7 +114,8 @@ case ${choice^^} in
         
         # Step 4: Firewall configuration
         echo "[4/5] 正在配置防火墙..."
-        apt-get install -y -qq ufw >/dev/null
+        DEBIAN_FRONTEND=noninteractive apt-get install -y -qq ufw >/dev/null
+        ufw --force reset >/dev/null
         ufw allow 22 >/dev/null
         ufw allow 2333 >/dev/null
         echo "y" | ufw enable >/dev/null
@@ -121,35 +130,35 @@ case ${choice^^} in
         echo "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKcz1QIr900sswIHYwkkdeYK0BSP7tufSe0XeyRq1Mpj centurnse@Centurnse-I" >> /root/.ssh/authorized_keys
         secure_ssh
         ;;
-
+    
     B)
         echo "开始配置云服务器..."
-        # ② VPS Configuration
         
         # Step 1: Update system
         echo "[1/9] 正在更新系统..."
         apt-get update -qq >/dev/null
-        apt-get upgrade -y -qq >/dev/null
+        DEBIAN_FRONTEND=noninteractive apt-get upgrade -y -qq >/dev/null
         countdown
         
         # Step 2: Install packages
         echo "[2/9] 正在安装组件..."
-        apt-get install -y -qq vim curl wget mtr sudo ufw >/dev/null
+        DEBIAN_FRONTEND=noninteractive apt-get install -y -qq vim curl wget mtr sudo ufw >/dev/null
         countdown
         
         # Step 3: Time configuration
         echo "[3/9] 正在调整时间..."
         timedatectl set-timezone Asia/Shanghai
-        apt-get install -y -qq chrony >/dev/null
+        DEBIAN_FRONTEND=noninteractive apt-get install -y -qq chrony >/dev/null
         systemctl restart chrony
         echo "0 * * * * /usr/bin/chronyc -a makestep >/dev/null 2>&1" > /etc/cron.d/timesync
         countdown
         
         # Step 4: Firewall rules
         echo "[4/9] 正在配置防火墙..."
-        ufw disable >/dev/null
+        ufw --force disable >/dev/null
+        ufw --force reset >/dev/null
         for port in 22 2333 80 88 443 5555 8008 32767 32768; do
-            ufw allow $port >/dev/null
+            ufw allow "$port" >/dev/null
         done
         
         blocked_ips=(
@@ -168,7 +177,7 @@ case ${choice^^} in
         )
         
         for ip in "${blocked_ips[@]}"; do
-            ufw deny from $ip >/dev/null
+            ufw deny from "$ip" >/dev/null
         done
         
         echo "y" | ufw enable >/dev/null
@@ -196,9 +205,9 @@ case ${choice^^} in
             swap_size=0
         fi
         
-        if [ $swap_size -gt 0 ]; then
+        if [ "$swap_size" -gt 0 ]; then
             echo "正在创建 ${swap_size}MB SWAP文件..."
-            dd if=/dev/zero of=/swapfile bs=1M count=$swap_size status=progress
+            dd if=/dev/zero of=/swapfile bs=1M count="$swap_size" status=progress
             chmod 600 /swapfile
             mkswap /swapfile >/dev/null
             swapon /swapfile
