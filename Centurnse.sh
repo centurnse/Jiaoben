@@ -98,10 +98,19 @@ case ${choice^^} in
         touch /root/.ssh/authorized_keys
         chmod 600 /root/.ssh/authorized_keys
         echo "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKcz1QIr900sswIHYwkkdeYK0BSP7tufSe0XeyRq1Mpj centurnse@Centurnse-I" >> /root/.ssh/authorized_keys
-        sed -i 's/^#*Port .*/Port 2333/' /etc/ssh/sshd_config
-        sed -i 's/^#*PasswordAuthentication .*/PasswordAuthentication no/' /etc/ssh/sshd_config
-        sed -i 's/^#*PubkeyAuthentication .*/PubkeyAuthentication yes/' /etc/ssh/sshd_config
-        systemctl restart ssh
+        
+        # SSH安全配置
+        sed -i '/^#*Port/c\Port 2333' /etc/ssh/sshd_config
+        sed -i '/^#*PasswordAuthentication/c\PasswordAuthentication no' /etc/ssh/sshd_config
+        sed -i '/^#*PubkeyAuthentication/c\PubkeyAuthentication yes' /etc/ssh/sshd_config
+        sed -i '/^#*ChallengeResponseAuthentication/c\ChallengeResponseAuthentication no' /etc/ssh/sshd_config
+        
+        # 兼容Debian11/12服务名称
+        if systemctl list-unit-files | grep -q "sshd.service"; then
+            systemctl restart sshd
+        else
+            systemctl restart ssh
+        fi
         ;;
     
     B)
@@ -130,7 +139,7 @@ case ${choice^^} in
         # Step 4: Firewall rules
         echo "[4/9] 正在配置防火墙..."
         ufw disable >/dev/null
-        for port in 22 80 88 443 5555 8008 32767 32768; do
+        for port in 22 2333 80 88 443 5555 8008 32767 32768; do
             ufw allow $port >/dev/null
         done
         
@@ -232,10 +241,19 @@ EOF
         touch /root/.ssh/authorized_keys
         chmod 600 /root/.ssh/authorized_keys
         echo "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKcz1QIr900sswIHYwkkdeYK0BSP7tufSe0XeyRq1Mpj centurnse@Centurnse-I" >> /root/.ssh/authorized_keys
-        sed -i 's/^#*Port .*/Port 2333/' /etc/ssh/sshd_config
-        sed -i 's/^#*PasswordAuthentication .*/PasswordAuthentication no/' /etc/ssh/sshd_config
-        sed -i 's/^#*PubkeyAuthentication .*/PubkeyAuthentication yes/' /etc/ssh/sshd_config
-        systemctl restart ssh
+        
+        # SSH安全配置
+        sed -i '/^#*Port/c\Port 2333' /etc/ssh/sshd_config
+        sed -i '/^#*PasswordAuthentication/c\PasswordAuthentication no' /etc/ssh/sshd_config
+        sed -i '/^#*PubkeyAuthentication/c\PubkeyAuthentication yes' /etc/ssh/sshd_config
+        sed -i '/^#*ChallengeResponseAuthentication/c\ChallengeResponseAuthentication no' /etc/ssh/sshd_config
+        
+        # 兼容Debian11/12服务名称
+        if systemctl list-unit-files | grep -q "sshd.service"; then
+            systemctl restart sshd
+        else
+            systemctl restart ssh
+        fi
         countdown
         
         # Step 9: Finalization
