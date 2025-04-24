@@ -85,45 +85,68 @@ case ${choice^^} in
         echo "y" | ufw enable >/dev/null
         countdown
         
-        # Step 5: SSH configuration
+        # Step 5: SSH configuration (物理服务器第五步)
         echo "[5/5] 正在配置SSH..."
+        # SSH安全配置函数
+        secure_ssh() {
+            local sshd_config="/etc/ssh/sshd_config"
+            cp "$sshd_config" "${sshd_config}.bak-$(date +%Y%m%d%H%M%S)"
+            
+            # 处理主配置文件
+            grep -vE '^#|^$' "$sshd_config" > "${sshd_config}.tmp"
+            
+            # 禁用密码登录
+            for setting in PasswordAuthentication ChallengeResponseAuthentication UsePAM KbdInteractiveAuthentication; do
+                sed -i "/^${setting}/d" "${sshd_config}.tmp"
+                echo "${setting} no" >> "${sshd_config}.tmp"
+            done
+            
+            # 强制密钥认证
+            sed -i "/^PubkeyAuthentication/d" "${sshd_config}.tmp"
+            echo "PubkeyAuthentication yes" >> "${sshd_config}.tmp"
+            
+            # 端口设置
+            sed -i "/^Port/d" "${sshd_config}.tmp"
+            echo "Port 2333" >> "${sshd_config}.tmp"
+            
+            sed -i "/^PermitRootLogin/d" "${sshd_config}.tmp"
+            echo "PermitRootLogin prohibit-password" >> "${sshd_config}.tmp"
+            
+            mv "${sshd_config}.tmp" "$sshd_config"
+            chmod 600 "$sshd_config"
+
+            # 处理sshd_config.d目录
+            if [ -d "/etc/ssh/sshd_config.d" ]; then
+                find /etc/ssh/sshd_config.d -name "*.conf" -type f | while read conf; do
+                    cp "$conf" "${conf}.bak"
+                    sed -i -E '/^(#*)(PasswordAuthentication|ChallengeResponseAuthentication|KbdInteractiveAuthentication)/ {
+                        s/^#//g
+                        s/(yes|no)/no/
+                    }' "$conf"
+                    grep -q "PasswordAuthentication" "$conf" || echo "PasswordAuthentication no" >> "$conf"
+                    grep -q "ChallengeResponseAuthentication" "$conf" || echo "ChallengeResponseAuthentication no" >> "$conf"
+                    grep -q "KbdInteractiveAuthentication" "$conf" || echo "KbdInteractiveAuthentication no" >> "$conf"
+                done
+            fi
+
+            pkill -9 sshd
+            rm -rf /var/run/sshd
+            
+            if systemctl is-active sshd &>/dev/null; then
+                systemctl restart sshd && systemctl enable sshd
+            elif systemctl is-active ssh &>/dev/null; then
+                systemctl restart ssh && systemctl enable ssh
+            else
+                service ssh restart && systemctl enable ssh
+            fi
+        }
+
         mkdir -p /root/.ssh
         chmod 700 /root/.ssh
         touch /root/.ssh/authorized_keys
         chmod 600 /root/.ssh/authorized_keys
         echo "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKcz1QIr900sswIHYwkkdeYK0BSP7tufSe0XeyRq1Mpj centurnse@Centurnse-I" >> /root/.ssh/authorized_keys
-        
-        # 强化SSH安全配置
-        sshd_config="/etc/ssh/sshd_config"
-        cp $sshd_config ${sshd_config}.bak
-        
-        sed -i '/^#*Port/d; /^Port/d' $sshd_config
-        echo "Port 2333" >> $sshd_config
-        
-        sed -i '/^#*PasswordAuthentication/d; /^PasswordAuthentication/d' $sshd_config
-        echo "PasswordAuthentication no" >> $sshd_config
-        
-        sed -i '/^#*PubkeyAuthentication/d; /^PubkeyAuthentication/d' $sshd_config
-        echo "PubkeyAuthentication yes" >> $sshd_config
-        
-        sed -i '/^#*ChallengeResponseAuthentication/d; /^ChallengeResponseAuthentication/d' $sshd_config
-        echo "ChallengeResponseAuthentication no" >> $sshd_config
-        
-        sed -i '/^#*UsePAM/d; /^UsePAM/d' $sshd_config
-        echo "UsePAM no" >> $sshd_config
-        
-        sed -i '/^#*PermitRootLogin/d; /^PermitRootLogin/d' $sshd_config
-        echo "PermitRootLogin prohibit-password" >> $sshd_config
-        
-        sed -i '/^#*KbdInteractiveAuthentication/d; /^KbdInteractiveAuthentication/d' $sshd_config
-        echo "KbdInteractiveAuthentication no" >> $sshd_config
-        
-        # 兼容Debian服务名称
-        if systemctl list-unit-files | grep -q "sshd.service"; then
-            systemctl restart sshd && systemctl enable sshd
-        else
-            systemctl restart ssh && systemctl enable ssh
-        fi
+        secure_ssh
         ;;
     
     B)
@@ -244,45 +267,68 @@ EOF
         echo "10 0 * * * find /var/log -type f -name \"*.log\" -exec truncate -s 0 {} \;" > /etc/cron.d/logclean
         countdown
         
-        # Step 8: SSH configuration
+        # Step 8: SSH configuration (云服务器第八步)
         echo "[8/9] 正在配置SSH..."
+        # SSH安全配置函数
+        secure_ssh() {
+            local sshd_config="/etc/ssh/sshd_config"
+            cp "$sshd_config" "${sshd_config}.bak-$(date +%Y%m%d%H%M%S)"
+            
+            # 处理主配置文件
+            grep -vE '^#|^$' "$sshd_config" > "${sshd_config}.tmp"
+            
+            # 禁用密码登录
+            for setting in PasswordAuthentication ChallengeResponseAuthentication UsePAM KbdInteractiveAuthentication; do
+                sed -i "/^${setting}/d" "${sshd_config}.tmp"
+                echo "${setting} no" >> "${sshd_config}.tmp"
+            done
+            
+            # 强制密钥认证
+            sed -i "/^PubkeyAuthentication/d" "${sshd_config}.tmp"
+            echo "PubkeyAuthentication yes" >> "${sshd_config}.tmp"
+            
+            # 端口设置
+            sed -i "/^Port/d" "${sshd_config}.tmp"
+            echo "Port 2333" >> "${sshd_config}.tmp"
+            
+            sed -i "/^PermitRootLogin/d" "${sshd_config}.tmp"
+            echo "PermitRootLogin prohibit-password" >> "${sshd_config}.tmp"
+            
+            mv "${sshd_config}.tmp" "$sshd_config"
+            chmod 600 "$sshd_config"
+
+            # 处理sshd_config.d目录
+            if [ -d "/etc/ssh/sshd_config.d" ]; then
+                find /etc/ssh/sshd_config.d -name "*.conf" -type f | while read conf; do
+                    cp "$conf" "${conf}.bak"
+                    sed -i -E '/^(#*)(PasswordAuthentication|ChallengeResponseAuthentication|KbdInteractiveAuthentication)/ {
+                        s/^#//g
+                        s/(yes|no)/no/
+                    }' "$conf"
+                    grep -q "PasswordAuthentication" "$conf" || echo "PasswordAuthentication no" >> "$conf"
+                    grep -q "ChallengeResponseAuthentication" "$conf" || echo "ChallengeResponseAuthentication no" >> "$conf"
+                    grep -q "KbdInteractiveAuthentication" "$conf" || echo "KbdInteractiveAuthentication no" >> "$conf"
+                done
+            fi
+
+            pkill -9 sshd
+            rm -rf /var/run/sshd
+            
+            if systemctl is-active sshd &>/dev/null; then
+                systemctl restart sshd && systemctl enable sshd
+            elif systemctl is-active ssh &>/dev/null; then
+                systemctl restart ssh && systemctl enable ssh
+            else
+                service ssh restart && systemctl enable ssh
+            fi
+        }
+
         mkdir -p /root/.ssh
         chmod 700 /root/.ssh
         touch /root/.ssh/authorized_keys
         chmod 600 /root/.ssh/authorized_keys
         echo "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKcz1QIr900sswIHYwkkdeYK0BSP7tufSe0XeyRq1Mpj centurnse@Centurnse-I" >> /root/.ssh/authorized_keys
-        
-        # 强化SSH安全配置
-        sshd_config="/etc/ssh/sshd_config"
-        cp $sshd_config ${sshd_config}.bak
-        
-        sed -i '/^#*Port/d; /^Port/d' $sshd_config
-        echo "Port 2333" >> $sshd_config
-        
-        sed -i '/^#*PasswordAuthentication/d; /^PasswordAuthentication/d' $sshd_config
-        echo "PasswordAuthentication no" >> $sshd_config
-        
-        sed -i '/^#*PubkeyAuthentication/d; /^PubkeyAuthentication/d' $sshd_config
-        echo "PubkeyAuthentication yes" >> $sshd_config
-        
-        sed -i '/^#*ChallengeResponseAuthentication/d; /^ChallengeResponseAuthentication/d' $sshd_config
-        echo "ChallengeResponseAuthentication no" >> $sshd_config
-        
-        sed -i '/^#*UsePAM/d; /^UsePAM/d' $sshd_config
-        echo "UsePAM no" >> $sshd_config
-        
-        sed -i '/^#*PermitRootLogin/d; /^PermitRootLogin/d' $sshd_config
-        echo "PermitRootLogin prohibit-password" >> $sshd_config
-        
-        sed -i '/^#*KbdInteractiveAuthentication/d; /^KbdInteractiveAuthentication/d' $sshd_config
-        echo "KbdInteractiveAuthentication no" >> $sshd_config
-        
-        # 兼容Debian服务名称
-        if systemctl list-unit-files | grep -q "sshd.service"; then
-            systemctl restart sshd && systemctl enable sshd
-        else
-            systemctl restart ssh && systemctl enable ssh
-        fi
+        secure_ssh
         countdown
         
         # Step 9: Finalization
