@@ -41,17 +41,13 @@ case ${choice^^} in
         
         # Step 3: Swap management
         echo "[3/5] 正在处理SWAP..."
-        # Disable all swap
         swapoff -a
-        # Remove swap entries
         sed -i '/swap/d' /etc/fstab
-        # Remove LVM swap
         if command -v lvm >/dev/null; then
             lv_path=$(lvs -o lv_path,vg_name,lv_name | grep -i swap | awk '{print $1}')
             if [ -n "$lv_path" ]; then
                 lvchange -an $lv_path >/dev/null 2>&1
                 lvremove -f $lv_path >/dev/null 2>&1
-                # 回收空间到root逻辑卷
                 root_lv=$(lvs -o lv_path,vg_name,lv_name | grep -i root | awk '{print $1}')
                 if [ -n "$root_lv" ]; then
                     lvextend -l +100%FREE $root_lv >/dev/null 2>&1
@@ -59,7 +55,6 @@ case ${choice^^} in
                 fi
             fi
         fi
-        # Update initramfs
         update-initramfs -u -k all >/dev/null 2>&1
         
         read -p "是否建立新的SWAP？（Type YES to continue，Type NO to next setp）: " swap_choice
@@ -67,7 +62,6 @@ case ${choice^^} in
             while true; do
                 read -p "请输入SWAP大小（GB，0-9999）: " swap_size
                 if [[ $swap_size =~ ^[0-9]+$ ]] && [ $swap_size -le 9999 ]; then
-                    # 清理旧swap文件
                     swapoff -a
                     rm -f /swapfile
                     dd if=/dev/zero of=/swapfile bs=1M count=$(($swap_size * 1024)) status=progress
@@ -99,17 +93,36 @@ case ${choice^^} in
         chmod 600 /root/.ssh/authorized_keys
         echo "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKcz1QIr900sswIHYwkkdeYK0BSP7tufSe0XeyRq1Mpj centurnse@Centurnse-I" >> /root/.ssh/authorized_keys
         
-        # SSH安全配置
-        sed -i '/^#*Port/c\Port 2333' /etc/ssh/sshd_config
-        sed -i '/^#*PasswordAuthentication/c\PasswordAuthentication no' /etc/ssh/sshd_config
-        sed -i '/^#*PubkeyAuthentication/c\PubkeyAuthentication yes' /etc/ssh/sshd_config
-        sed -i '/^#*ChallengeResponseAuthentication/c\ChallengeResponseAuthentication no' /etc/ssh/sshd_config
+        # 强化SSH安全配置
+        sshd_config="/etc/ssh/sshd_config"
+        cp $sshd_config ${sshd_config}.bak
         
-        # 兼容Debian11/12服务名称
+        sed -i '/^#*Port/d; /^Port/d' $sshd_config
+        echo "Port 2333" >> $sshd_config
+        
+        sed -i '/^#*PasswordAuthentication/d; /^PasswordAuthentication/d' $sshd_config
+        echo "PasswordAuthentication no" >> $sshd_config
+        
+        sed -i '/^#*PubkeyAuthentication/d; /^PubkeyAuthentication/d' $sshd_config
+        echo "PubkeyAuthentication yes" >> $sshd_config
+        
+        sed -i '/^#*ChallengeResponseAuthentication/d; /^ChallengeResponseAuthentication/d' $sshd_config
+        echo "ChallengeResponseAuthentication no" >> $sshd_config
+        
+        sed -i '/^#*UsePAM/d; /^UsePAM/d' $sshd_config
+        echo "UsePAM no" >> $sshd_config
+        
+        sed -i '/^#*PermitRootLogin/d; /^PermitRootLogin/d' $sshd_config
+        echo "PermitRootLogin prohibit-password" >> $sshd_config
+        
+        sed -i '/^#*KbdInteractiveAuthentication/d; /^KbdInteractiveAuthentication/d' $sshd_config
+        echo "KbdInteractiveAuthentication no" >> $sshd_config
+        
+        # 兼容Debian服务名称
         if systemctl list-unit-files | grep -q "sshd.service"; then
-            systemctl restart sshd
+            systemctl restart sshd && systemctl enable sshd
         else
-            systemctl restart ssh
+            systemctl restart ssh && systemctl enable ssh
         fi
         ;;
     
@@ -167,16 +180,13 @@ case ${choice^^} in
         
         # Step 5: Swap configuration
         echo "[5/9] 正在配置SWAP..."
-        # 清理现有swap
         swapoff -a >/dev/null 2>&1
         rm -f /swapfile >/dev/null 2>&1
         sed -i '/swapfile/d' /etc/fstab
 
-        # 增强数值获取可靠性
         total_mem=$(free -m | awk '/Mem:/ {print $2}' | tr -cd '0-9')
         free_space=$(df -m / | awk 'NR==2 {print $4}' | tr -cd '0-9')
         
-        # 添加默认值防止空值
         total_mem=${total_mem:-0}
         free_space=${free_space:-0}
 
@@ -242,17 +252,36 @@ EOF
         chmod 600 /root/.ssh/authorized_keys
         echo "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKcz1QIr900sswIHYwkkdeYK0BSP7tufSe0XeyRq1Mpj centurnse@Centurnse-I" >> /root/.ssh/authorized_keys
         
-        # SSH安全配置
-        sed -i '/^#*Port/c\Port 2333' /etc/ssh/sshd_config
-        sed -i '/^#*PasswordAuthentication/c\PasswordAuthentication no' /etc/ssh/sshd_config
-        sed -i '/^#*PubkeyAuthentication/c\PubkeyAuthentication yes' /etc/ssh/sshd_config
-        sed -i '/^#*ChallengeResponseAuthentication/c\ChallengeResponseAuthentication no' /etc/ssh/sshd_config
+        # 强化SSH安全配置
+        sshd_config="/etc/ssh/sshd_config"
+        cp $sshd_config ${sshd_config}.bak
         
-        # 兼容Debian11/12服务名称
+        sed -i '/^#*Port/d; /^Port/d' $sshd_config
+        echo "Port 2333" >> $sshd_config
+        
+        sed -i '/^#*PasswordAuthentication/d; /^PasswordAuthentication/d' $sshd_config
+        echo "PasswordAuthentication no" >> $sshd_config
+        
+        sed -i '/^#*PubkeyAuthentication/d; /^PubkeyAuthentication/d' $sshd_config
+        echo "PubkeyAuthentication yes" >> $sshd_config
+        
+        sed -i '/^#*ChallengeResponseAuthentication/d; /^ChallengeResponseAuthentication/d' $sshd_config
+        echo "ChallengeResponseAuthentication no" >> $sshd_config
+        
+        sed -i '/^#*UsePAM/d; /^UsePAM/d' $sshd_config
+        echo "UsePAM no" >> $sshd_config
+        
+        sed -i '/^#*PermitRootLogin/d; /^PermitRootLogin/d' $sshd_config
+        echo "PermitRootLogin prohibit-password" >> $sshd_config
+        
+        sed -i '/^#*KbdInteractiveAuthentication/d; /^KbdInteractiveAuthentication/d' $sshd_config
+        echo "KbdInteractiveAuthentication no" >> $sshd_config
+        
+        # 兼容Debian服务名称
         if systemctl list-unit-files | grep -q "sshd.service"; then
-            systemctl restart sshd
+            systemctl restart sshd && systemctl enable sshd
         else
-            systemctl restart ssh
+            systemctl restart ssh && systemctl enable ssh
         fi
         countdown
         
