@@ -13,34 +13,66 @@ YELLOW="${ESC}38;5;226m"
 GREEN="${ESC}38;5;46m"
 RED="${ESC}38;5;196m"
 WHITE="${ESC}38;5;255m"
-GRADIENT_START="${ESC}38;5;33m"
-GRADIENT_END="${ESC}38;5;93m"
 BG_DARK="${ESC}48;5;232m"
 
-# 生成渐变色文本
-gradient_text() {
-    local text="Powered By BitsFlowCloud"
-    local length=${#text}
-    local gradient=""
-    
-    for ((i=0; i<length; i++)); do
-        r=$(( 33 + (93-33)*i/length ))
-        gradient+="${ESC}38;5;${r}m${text:$i:1}"
-    done
-    echo -e "${BOLD}${gradient}${RESET}"
-}
-
-# 打印现代风格标题
+# ======================
+# 标题生成函数
+# ======================
 print_header() {
     clear
+    local title="Powered By BitsFlowCloud"
+    local title_length=${#title}
+    local total_width=56
+    local padding=$(( (total_width - title_length) / 2 ))
+    
+    # 构建渐变标题
+    local gradient=""
+    for ((i=0; i<title_length; i++)); do
+        color_code=$(( 33 + (93-33)*i/title_length ))
+        gradient+="${ESC}38;5;${color_code}m${title:$i:1}"
+    done
+
     echo -e "${BG_DARK}${WHITE}"
     echo " _________________________________________________________________"
     echo "|                                                                 |"
-    echo -n "|   "
-    gradient_text
-    echo -e "   |"
-    echo "|_____________________________________________________________${RESET}${BG_DARK}_${RESET}|"
-    echo -e "${RESET}\n"
+    printf "|%${padding}s${gradient}%$((total_width - title_length - padding))s${WHITE}|\n" "" ""
+    echo "|_______________________________________________________________${RESET}${BG_DARK}|${RESET}"
+    echo -e "\n${BOLD}${WHITE}系统初始化检测通过 ➤ 开始自动化配置流程${RESET}\n"
+}
+
+# ======================
+# 进度显示函数
+# ======================
+show_progress() {
+    print_header
+    
+    case $current_step in
+        1) desc="正在更新软件源数据..." ;;
+        2) desc="安装系统工具套件..." ;;
+        3) desc="配置时区与时间同步..." ;;
+        4) desc="设置防火墙规则..." ;;
+        5) desc="优化SWAP配置..." ;; 
+        6) desc="调整网络参数..." ;;
+        7) desc="部署日志清理方案..." ;;
+        8) desc="强化SSH安全配置..." ;;
+    esac
+
+    echo -e "${BOLD}${WHITE}▛${BLUE} 阶段 ${current_step}/8 ${WHITE}» ${CYAN}${desc}${RESET}"
+    echo -e "${BLUE}▌${RESET}"
+    
+    # 显示当前步骤详情
+    case $current_step in
+        1) echo -e "${YELLOW}» 正在刷新软件仓库索引...${RESET}" ;;
+        2) echo -e "${YELLOW}» 正在安装: vim curl wget mtr sudo ufw...${RESET}" ;;
+        3) echo -e "${YELLOW}» 设置时区为Asia/Shanghai...${RESET}" ;;
+        4) echo -e "${YELLOW}» 放行端口: 22,80,88,443,5555,8008,32767,32768${RESET}" ;;
+        5) echo -e "${YELLOW}» 根据内存大小自动配置SWAP...${RESET}" ;;
+        6) echo -e "${YELLOW}» 优化TCP/IP网络参数...${RESET}" ;;
+        7) echo -e "${YELLOW}» 配置每日日志清理任务...${RESET}" ;;
+        8) echo -e "${YELLOW}» 禁用密码登录，启用密钥认证...${RESET}" ;;
+    esac
+    
+    echo -e "${BLUE}▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔${RESET}"
 }
 
 # ======================
@@ -52,7 +84,7 @@ print_header() {
 }
 
 # ======================
-# 全局变量定义
+# 包管理器检测
 # ======================
 declare -A PKGMAP=(
     ["ubuntu"]="apt-get"
@@ -65,247 +97,191 @@ declare -A PKGMAP=(
 )
 DISTRO=$(awk -F= '/^ID=/{print $2}' /etc/os-release | tr -d '"')
 PM=${PKGMAP[$DISTRO]}
-total_steps=8
-current_step=1
-
-# ======================
-# 进度显示系统
-# ======================
-show_progress() {
-    print_header
-    echo -e "${BOLD}${WHITE}▏${CYAN} 当前进度: ${GREEN}${current_step}/${total_steps}${RESET}"
-    echo -e "${BLUE}▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔${RESET}"
-    
-    # 动态进度显示
-    declare -a steps=(
-        "系统更新       [${YELLOW}基础环境准备${RESET}]"
-        "组件安装       [${CYAN}工具链部署${RESET}]" 
-        "时间校准       [${MAGENTA}系统时钟管理${RESET}]"
-        "防火墙配置     [${RED}网络安全加固${RESET}]"
-        "SWAP优化      [${GREEN}内存管理${RESET}]"
-        "网络参数调优   [${BLUE}性能优化${RESET}]"
-        "日志清理设置   [${WHITE}存储管理${RESET}]"
-        "SSH安全配置   [${YELLOW}访问控制${RESET}]"
-    )
-    
-    for ((i=0; i<total_steps; i++)); do
-        if (( i < current_step-1 )); then
-            echo -e "${GREEN}✓ ${steps[$i]}${RESET}"
-        elif (( i == current_step-1 )); then
-            echo -e "${WHITE}◼ ${steps[$i]}${RESET}"
-        else
-            echo -e "${WHITE}◻ ${steps[$i]}${RESET}"
-        fi
-    done
-    
-    # 动态倒计时
-    echo -e "\n${BOLD}${RED}⏳ 下一阶段准备中..."
-    for i in {3..1}; do
-        echo -ne "${RED}${BOLD}剩余等待时间: ${i}s${RESET}\r"
-        sleep 1
-    done
-    ((current_step++))
-}
 
 # ======================
 # 功能模块实现
 # ======================
-
-# 系统更新
 update_system() {
+    echo -e "${BLUE}[1/3]${WHITE} 刷新软件仓库索引...${RESET}"
     case $DISTRO in
-        ubuntu|debian)
-            $PM update -qq > /dev/null
-            $PM upgrade -yqq > /dev/null
-            ;;
-        centos|rhel|fedora)
-            $PM update -y --quiet > /dev/null
-            ;;
-        arch)
-            pacman -Syu --noconfirm --needed --quiet > /dev/null
-            ;;
-        opensuse)
-            zypper --non-interactive refresh > /dev/null
-            zypper --non-interactive update -y > /dev/null
-            ;;
+        ubuntu|debian) $PM update -yqq ;;
+        centos|rhel|fedora) $PM makecache --quiet ;;
+        arch) pacman -Sy --noconfirm --quiet ;;
+        opensuse) zypper --non-interactive refresh ;;
+    esac
+
+    echo -e "${BLUE}[2/3]${WHITE} 升级系统组件...${RESET}"
+    case $DISTRO in
+        ubuntu|debian) $PM upgrade -yqq ;;
+        centos|rhel|fedora) $PM update -y --quiet ;;
+        arch) pacman -Su --noconfirm --quiet ;;
+        opensuse) zypper --non-interactive update -y ;;
+    esac
+
+    echo -e "${BLUE}[3/3]${WHITE} 清理过期软件包...${RESET}"
+    case $DISTRO in
+        ubuntu|debian) $PM autoremove -yqq ;;
+        centos|rhel|fedora) $PM autoremove -y --quiet ;;
     esac
 }
 
-# 组件安装
 install_components() {
     local components=(vim curl wget mtr sudo ufw)
+    echo -e "${GREEN}安装核心工具套件：${YELLOW}${components[*]}${RESET}"
+    
     case $DISTRO in
         ubuntu|debian)
-            $PM install -yqq "${components[@]}" > /dev/null
-            ;;
+            $PM install -yqq "${components[@]}" ;;
         centos|rhel|fedora)
-            $PM install -y -q epel-release > /dev/null
-            $PM install -y -q "${components[@]}" > /dev/null
-            ;;
+            $PM install -y -q epel-release
+            $PM install -y -q "${components[@]}" ;;
         arch)
-            pacman -S --noconfirm --needed --quiet "${components[@]}" > /dev/null
-            ;;
+            pacman -S --noconfirm --quiet "${components[@]}" ;;
         opensuse)
-            zypper --non-interactive install -y "${components[@]}" > /dev/null
-            ;;
+            zypper --non-interactive install -y "${components[@]}" ;;
     esac
 }
 
-# 时间校准
 adjust_time() {
-    timedatectl set-timezone Asia/Shanghai > /dev/null
+    echo -e "${CYAN}» 设置时区为Asia/Shanghai...${RESET}"
+    timedatectl set-timezone Asia/Shanghai
+    
+    echo -e "${CYAN}» 部署时间同步服务...${RESET}"
     case $DISTRO in
         ubuntu|debian|centos|rhel|fedora)
-            $PM install -y -q chrony > /dev/null
-            systemctl enable --now chronyd > /dev/null
-            chronyc makestep > /dev/null
-            echo "0 * * * * chronyc makestep > /dev/null" | crontab -
-            ;;
+            $PM install -y -q chrony
+            systemctl enable --now chronyd
+            chronyc makestep
+            echo "0 * * * * chronyc makestep > /dev/null" | crontab - ;;
         arch|opensuse)
-            timedatectl set-ntp true > /dev/null
-            echo "0 * * * * timedatectl set-ntp true" | crontab -
-            ;;
+            timedatectl set-ntp true
+            echo "0 * * * * timedatectl set-ntp true" | crontab - ;;
     esac
 }
 
-# 防火墙配置
 configure_firewall() {
-    ufw --force disable > /dev/null
-    ufw --force reset > /dev/null
-    
-    # 端口放行规则
+    echo -e "${RED}» 初始化防火墙规则...${RESET}"
+    ufw --force disable
+    ufw --force reset
+
     declare -a ports=(22 80 88 443 5555 8008 32767 32768)
+    echo -e "${YELLOW}放行端口：${WHITE}${ports[*]}${RESET}"
     for port in "${ports[@]}"; do
-        ufw allow "$port"/tcp > /dev/null
+        ufw allow "$port"/tcp
     done
-    
-    # IP段封锁
+
     declare -a blocked_subnets=(
-        162.142.125.0/24
-        167.94.138.0/24
-        167.94.145.0/24
-        167.94.146.0/24
-        167.248.133.0/24
-        199.45.154.0/24
-        199.45.155.0/24
-        206.168.34.0/24
-        2602:80d:1000:b0cc:e::/80
-        2620:96:e000:b0cc:e::/80
-        2602:80d:1003::/112
-        2602:80d:1004::/112
+        162.142.125.0/24 167.94.138.0/24 167.94.145.0/24 
+        167.94.146.0/24 167.248.133.0/24 199.45.154.0/24
+        199.45.155.0/24 206.168.34.0/24 2602:80d:1000:b0cc:e::/80
+        2620:96:e000:b0cc:e::/80 2602:80d:1003::/112 2602:80d:1004::/112
     )
-    
+    echo -e "${RED}» 封锁高危IP段：${RESET}"
+    printf "${WHITE}%s${RESET}\n" "${blocked_subnets[@]}" | column -c 80
     for subnet in "${blocked_subnets[@]}"; do
-        ufw deny from "$subnet" > /dev/null
+        ufw deny from "$subnet"
     done
-    
-    ufw default deny incoming > /dev/null
-    ufw default allow outgoing > /dev/null
-    ufw --force enable > /dev/null
+
+    ufw default deny incoming
+    ufw default allow outgoing
+    ufw --force enable
 }
 
-# SWAP管理
 setup_swap() {
     local mem_total=$(free -m | awk '/Mem:/{print $2}')
     local disk_free=$(df -BG / | awk 'NR==2{gsub(/[^0-9]/,"",$4); print $4}')
     local swapfile="/swapfile"
 
     [ -f "$swapfile" ] && {
-        swapoff "$swapfile" > /dev/null
-        rm -f "$swapfile" > /dev/null
+        echo -e "${YELLOW}» 移除现有SWAP文件...${RESET}"
+        swapoff "$swapfile"
+        rm -f "$swapfile"
     }
 
+    echo -e "${GREEN}» 内存检测：${WHITE}${mem_total}MB | ${WHITE}磁盘剩余：${disk_free}GB${RESET}"
+    
     if (( mem_total < 512 && disk_free >= 5 )); then
+        echo -e "${BLUE}» 创建512MB SWAP文件${RESET}"
         dd if=/dev/zero of="$swapfile" bs=1M count=512 status=none
     elif (( mem_total >= 512 && mem_total < 1024 && disk_free >= 8 )); then
+        echo -e "${BLUE}» 创建1GB SWAP文件${RESET}"
         dd if=/dev/zero of="$swapfile" bs=1M count=1024 status=none
     elif (( mem_total >= 1024 && mem_total < 2048 && disk_free >= 10 )); then
+        echo -e "${BLUE}» 创建1GB SWAP文件${RESET}"
         dd if=/dev/zero of="$swapfile" bs=1M count=1024 status=none
     else
+        echo -e "${CYAN}» 跳过SWAP设置${RESET}"
         return 0
     fi
 
-    chmod 600 "$swapfile" > /dev/null
-    mkswap "$swapfile" > /dev/null
-    swapon "$swapfile" > /dev/null
+    chmod 600 "$swapfile"
+    mkswap "$swapfile"
+    swapon "$swapfile"
     echo "$swapfile none swap sw 0 0" >> /etc/fstab
 }
 
-# 网络优化
 optimize_network() {
+    echo -e "${MAGENTA}» 应用网络性能优化参数${RESET}"
     cat > /etc/sysctl.d/99-network.conf <<'EOF'
-# 内核基础优化
 net.ipv4.tcp_no_metrics_save=1
 net.ipv4.tcp_ecn=0
 net.ipv4.tcp_frto=0
 net.ipv4.tcp_mtu_probing=0
 net.ipv4.tcp_rfc1337=0
-
-# 流量控制优化
 net.ipv4.tcp_sack=1
 net.ipv4.tcp_fack=1
 net.ipv4.tcp_window_scaling=1
 net.ipv4.tcp_adv_win_scale=1
 net.ipv4.tcp_moderate_rcvbuf=1
-
-# 内存缓冲区设置
 net.core.rmem_max=33554432
 net.core.wmem_max=33554432
 net.ipv4.tcp_rmem=4096 87380 33554432
 net.ipv4.tcp_wmem=4096 16384 33554432
 net.ipv4.udp_rmem_min=8192
 net.ipv4.udp_wmem_min=8192
-
-# 拥塞控制算法
 net.core.default_qdisc=fq
 net.ipv4.tcp_congestion_control=bbr
-
-# 网络转发配置
 net.ipv4.conf.all.route_localnet=1
 net.ipv4.ip_forward=1
 net.ipv4.conf.all.forwarding=1
 net.ipv4.conf.default.forwarding=1
 EOF
-    sysctl -p /etc/sysctl.d/99-network.conf > /dev/null
+    sysctl -p /etc/sysctl.d/99-network.conf
 }
 
-# 日志清理
 setup_logrotate() {
+    echo -e "${WHITE}» 配置每日日志清理任务${RESET}"
     cat > /etc/cron.daily/logclean <<'EOF'
 #!/bin/bash
 find /var/log -type f -name "*.log" -exec truncate -s 0 {} \;
 journalctl --vacuum-time=1d > /dev/null
+find /var/log -type f -name "*.1" -delete
 EOF
     chmod +x /etc/cron.daily/logclean
 }
 
-# SSH安全配置
 configure_ssh() {
+    echo -e "${YELLOW}» 加固SSH服务配置${RESET}"
     local ssh_dir="/root/.ssh"
     local auth_file="$ssh_dir/authorized_keys"
 
-    # 目录权限管理
     [ ! -d "$ssh_dir" ] && {
         mkdir -p "$ssh_dir"
         chmod 700 "$ssh_dir"
     }
 
-    # 密钥文件管理
     [ ! -f "$auth_file" ] && {
         touch "$auth_file"
         chmod 600 "$auth_file"
     }
 
-    # 写入公钥
     grep -q "centurnse@Centurnse-I" "$auth_file" || \
     echo "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKcz1QIr900sswIHYwkkdeYK0BSP7tufSe0XeyRq1Mpj centurnse@Centurnse-I" >> "$auth_file"
 
-    # 配置修改
     sed -i '/^#*PasswordAuthentication/s/.*/PasswordAuthentication no/' /etc/ssh/sshd_config
     sed -i '/^#*PubkeyAuthentication/s/.*/PubkeyAuthentication yes/' /etc/ssh/sshd_config
     
-    # 服务重启
-    systemctl restart sshd > /dev/null
+    systemctl restart sshd
 }
 
 # ======================
@@ -313,23 +289,28 @@ configure_ssh() {
 # ======================
 main() {
     print_header
-    echo -e "${WHITE}${BOLD}▶ 初始化系统环境检测...${RESET}"
-    sleep 2
-    
-    update_system && show_progress
-    install_components && show_progress
-    adjust_time && show_progress
-    configure_firewall && show_progress
-    setup_swap && show_progress
-    optimize_network && show_progress
-    setup_logrotate && show_progress
-    configure_ssh && show_progress
-    
+    for current_step in {1..8}; do
+        show_progress
+        case $current_step in
+            1) update_system ;;
+            2) install_components ;;
+            3) adjust_time ;;
+            4) configure_firewall ;;
+            5) setup_swap ;;
+            6) optimize_network ;;
+            7) setup_logrotate ;;
+            8) configure_ssh ;;
+        esac
+        sleep 1
+    done
+
     echo -e "\n${GREEN}${BOLD}✅ 所有配置已完成！${RESET}"
     echo -e "${BLUE}系统将在5秒后重启以应用所有更改...${RESET}"
-    sleep 5
+    for i in {5..1}; do
+        echo -ne "${BOLD}剩余时间: ${i}s${RESET}\r"
+        sleep 1
+    done
     reboot
 }
 
-# 执行入口
 main
