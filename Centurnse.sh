@@ -101,9 +101,10 @@ case ${choice^^} in
             while true; do
                 read -p "请输入SWAP大小（GB，0-9999）: " swap_size
                 if [[ $swap_size =~ ^[0-9]+$ ]] && [ $swap_size -le 9999 ]; then
+                    echo "正在配置 ${swap_size}GB 的SWAP..."
                     swapoff -a >/dev/null 2>&1
                     rm -f /swapfile >/dev/null 2>&1
-                    dd if=/dev/zero of=/swapfile bs=1M count=$(($swap_size * 1024)) status=progress
+                    dd if=/dev/zero of=/swapfile bs=1G count=$swap_size status=progress
                     chmod 600 /swapfile
                     mkswap /swapfile >/dev/null
                     swapon /swapfile
@@ -207,21 +208,30 @@ case ${choice^^} in
 
         if [ "$total_mem" -lt 512 ] && [ "$free_space" -gt 5120 ]; then
             swap_size=512
-        elif [ "$total_mem" -ge 512 ] && [ "$total_mem" -lt 1024 ] && [ "$free_space" -gt 8192 ]; then
-            swap_size=1024
-        elif [ "$total_mem" -ge 1024 ] && [ "$total_mem" -lt 2048 ] && [ "$free_space" -gt 10240 ]; then
-            swap_size=1024
-        else
-            swap_size=0
-        fi
-        
-        if [ "$swap_size" -gt 0 ]; then
-            echo "正在创建 ${swap_size}MB SWAP文件..."
-            dd if=/dev/zero of=/swapfile bs=1M count="$swap_size" status=progress
+            echo "自动配置 512MB SWAP..."
+            dd if=/dev/zero of=/swapfile bs=1M count=$swap_size status=progress
             chmod 600 /swapfile
             mkswap /swapfile >/dev/null
             swapon /swapfile
             echo "/swapfile none swap sw 0 0" >> /etc/fstab
+        elif [ "$total_mem" -ge 512 ] && [ "$total_mem" -lt 1024 ] && [ "$free_space" -gt 8192 ]; then
+            swap_size=1024
+            echo "自动配置 1024MB SWAP..."
+            dd if=/dev/zero of=/swapfile bs=1M count=$swap_size status=progress
+            chmod 600 /swapfile
+            mkswap /swapfile >/dev/null
+            swapon /swapfile
+            echo "/swapfile none swap sw 0 0" >> /etc/fstab
+        elif [ "$total_mem" -ge 1024 ] && [ "$total_mem" -lt 2048 ] && [ "$free_space" -gt 10240 ]; then
+            swap_size=1024
+            echo "自动配置 1024MB SWAP..."
+            dd if=/dev/zero of=/swapfile bs=1M count=$swap_size status=progress
+            chmod 600 /swapfile
+            mkswap /swapfile >/dev/null
+            swapon /swapfile
+            echo "/swapfile none swap sw 0 0" >> /etc/fstab
+        else
+            echo "内存充足，跳过SWAP配置"
         fi
         countdown
         
