@@ -17,7 +17,7 @@ countdown() {
 
 # SSH安全配置函数
 secure_ssh() {
-    echo "正在配置SSH安全设置..."
+    echo ">>> 正在配置SSH安全设置 <<<"
     local sshd_config="/etc/ssh/sshd_config"
     [ -f "$sshd_config" ] || { echo "SSH配置文件不存在"; return 1; }
     
@@ -27,32 +27,36 @@ secure_ssh() {
     # 主配置文件设置
     sed -i '/^#*PasswordAuthentication/c\PasswordAuthentication no' "$sshd_config"
     sed -i '/^#*PubkeyAuthentication/c\PubkeyAuthentication yes' "$sshd_config"
-    sed -i '/^#*ChallengeResponseAuthentication/c\ChallengeResponseAuthentication no' "$sshd_config"
     sed -i '/^#*Port/c\Port 2333' "$sshd_config"
     sed -i '/^#*PermitRootLogin/c\PermitRootLogin prohibit-password' "$sshd_config"
 
-    # 处理可能存在的覆盖配置
+    # 仅处理sshd_config.d中的PasswordAuthentication
     if [ -d "/etc/ssh/sshd_config.d" ]; then
         find /etc/ssh/sshd_config.d -name "*.conf" -type f | while read conf; do
-            echo "处理覆盖配置文件：$conf"
+            echo "处理配置文件：$conf"
             cp "$conf" "${conf}.bak"
             sed -i '/^#*PasswordAuthentication/c\PasswordAuthentication no' "$conf"
         done
     fi
 
-    # 重启SSH服务
-    if systemctl is-active sshd &>/dev/null; then
+    # 根据服务名称重启SSH
+    if systemctl list-unit-files --type=service | grep -q "^sshd.service"; then
+        echo "检测到sshd服务，正在重启..."
         systemctl restart sshd
     else
+        echo "检测到ssh服务，正在重启..."
         systemctl restart ssh
     fi
 }
 
 # Main menu
 clear
+echo "======================================"
+echo "         服务器初始化配置脚本         "
+echo "======================================"
 echo "请选择配置类型："
-echo "a) Use for Dedicated Server (按A键)"
-echo "b) Use for VPS (按B键)"
+echo "a) 物理服务器配置 (按A键)"
+echo "b) 云服务器配置 (按B键)"
 read -n1 -p "请输入选择 (A/B): " choice
 echo
 
@@ -92,7 +96,7 @@ case ${choice^^} in
         
         update-initramfs -u -k all >/dev/null 2>&1
         
-        read -p "是否建立新的SWAP？（Type YES to continue，Type NO to next setp）: " swap_choice
+        read -p "是否建立新的SWAP？（输入YES继续，输入NO跳过）: " swap_choice
         if [[ "${swap_choice^^}" == "YES" ]]; then
             while true; do
                 read -p "请输入SWAP大小（GB，0-9999）: " swap_size
@@ -129,6 +133,12 @@ case ${choice^^} in
         chmod 600 /root/.ssh/authorized_keys
         echo "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKcz1QIr900sswIHYwkkdeYK0BSP7tufSe0XeyRq1Mpj centurnse@Centurnse-I" >> /root/.ssh/authorized_keys
         secure_ssh
+        
+        echo "======================================"
+        echo "物理服务器配置已完成！"
+        echo "请使用以下命令测试连接："
+        echo "ssh -p 2333 root@您的服务器IP"
+        echo "======================================"
         ;;
     
     B)
@@ -261,11 +271,14 @@ EOF
         
         # Step 9: Finalization
         echo "[9/9] 完成所有配置！"
+        echo "======================================"
+        echo "云服务器配置已完成！"
+        echo "请使用以下命令测试连接："
+        echo "ssh -p 2333 root@您的服务器IP"
+        echo "======================================"
         ;;
     *)
-        echo "无效选择！"
+        echo "无效选择！脚本退出。"
         exit 1
         ;;
 esac
-
-echo "所有配置已完成！"
