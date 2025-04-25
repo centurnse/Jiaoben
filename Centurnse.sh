@@ -118,6 +118,13 @@ secure_ssh() {
     pretty_echo "${GREEN}✓ SSH安全配置完成${NC}"
 }
 
+# 获取准确的内存大小(MB)
+get_total_memory() {
+    local mem_kb=$(grep MemTotal /proc/meminfo | awk '{print $2}')
+    local mem_mb=$((mem_kb / 1024))
+    echo $mem_mb
+}
+
 # 主菜单
 clear
 echo -e "${PURPLE}╔══════════════════════════════════════╗"
@@ -288,13 +295,9 @@ case ${choice^^} in
         sed -i '/swap/d' /etc/fstab
         rm -f /swapfile >/dev/null 2>&1
         
-        # 获取内存和磁盘空间(以MB为单位)
-        total_mem=$(free -m | awk '/Mem:/ {print $2}')
+        # 获取准确的内存和磁盘空间信息
+        total_mem=$(get_total_memory)
         free_space=$(df -m / | awk 'NR==2 {print $4}')
-        
-        # 设置默认值防止空值
-        total_mem=${total_mem:-0}
-        free_space=${free_space:-0}
         
         pretty_echo "当前内存: ${total_mem}MB, 可用空间: ${free_space}MB"
 
@@ -339,7 +342,6 @@ case ${choice^^} in
             pretty_echo "${YELLOW}RAM ≥ 2GB，跳过SWAP配置${NC}"
         else
             pretty_echo "${YELLOW}磁盘空间不足，跳过SWAP配置${NC}"
-            pretty_echo "当前内存: ${total_mem}MB, 可用空间: ${free_space}MB"
         fi
         countdown
         
