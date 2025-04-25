@@ -8,13 +8,19 @@ fi
 # Fix locale issues silently
 fix_locale() {
     echo "检测到locale配置问题，正在修复..." > /dev/null
+    # 安装必要语言包
+    apt-get install -y locales > /dev/null 2>&1
+    # 配置locale
     export LC_ALL="en_US.UTF-8"
     export LANG="en_US.UTF-8"
     export LANGUAGE="en_US:en"
-    sed -i '/^#.*zh_CN.UTF-8/s/^#//' /etc/locale.gen
-    sed -i '/^#.*en_US.UTF-8/s/^#//' /etc/locale.gen
+    # 取消注释需要的locale
+    sed -i '/en_US.UTF-8/s/^#//g' /etc/locale.gen
+    sed -i '/zh_CN.UTF-8/s/^#//g' /etc/locale.gen
+    # 生成locale
     locale-gen > /dev/null 2>&1
     update-locale LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8 > /dev/null 2>&1
+    dpkg-reconfigure --frontend=noninteractive locales > /dev/null 2>&1
 }
 
 # Check and fix locale
@@ -51,17 +57,17 @@ secure_ssh() {
     if [ -d "/etc/ssh/sshd_config.d" ]; then
         find /etc/ssh/sshd_config.d -name "*.conf" -type f | while read conf; do
             echo "处理配置文件：$conf"
-            cp "$conf" "${conf}.bak"
-            sed -i '/^#*PasswordAuthentication/c\PasswordAuthentication no' "$conf"
+            [ -f "$conf" ] && {
+                cp "$conf" "${conf}.bak"
+                sed -i '/^#*PasswordAuthentication/c\PasswordAuthentication no' "$conf"
+            }
         done
     fi
 
     # 根据服务名称重启SSH
     if systemctl list-unit-files --type=service | grep -q "^sshd.service"; then
-        echo "检测到sshd服务，正在重启..."
         systemctl restart sshd
     else
-        echo "检测到ssh服务，正在重启..."
         systemctl restart ssh
     fi
 }
@@ -122,7 +128,9 @@ case ${choice^^} in
                     swapoff -a >/dev/null 2>&1
                     rm -f /swapfile >/dev/null 2>&1
                     # 使用更安全的方式创建大文件
-                    fallocate -l ${swap_size}G /swapfile || dd if=/dev/zero of=/swapfile bs=1M count=$(($swap_size * 1024)) status=progress
+                    if ! fallocate -l ${swap_size}G /swapfile 2>/dev/null; then
+                        dd if=/dev/zero of=/swapfile bs=1M count=$(($swap_size * 1024)) status=progress
+                    fi
                     chmod 600 /swapfile
                     mkswap /swapfile >/dev/null || { echo "SWAP文件创建失败，请检查磁盘空间"; exit 1; }
                     swapon /swapfile || { echo "SWAP激活失败，请检查日志"; exit 1; }
@@ -218,16 +226,15 @@ case ${choice^^} in
         rm -f /swapfile >/dev/null 2>&1
         sed -i '/swapfile/d' /etc/fstab
 
-        total_mem=$(free -m | awk '/Mem:/ {print $2}' | tr -cd '0-9')
-        free_space=$(df -m / | awk 'NR==2 {print $4}' | tr -cd '0-9')
-        
-        total_mem=${total_mem:-0}
-        free_space=${free_space:-0}
+        total_mem=$(free -m | awk '/Mem:/ {print $2}')
+        free_space=$(df -m / | awk 'NR==2 {print $4}')
 
         if [ "$total_mem" -lt 512 ] && [ "$free_space" -gt 5120 ]; then
             swap_size=512
             echo "自动配置 512MB SWAP..."
-            fallocate -l ${swap_size}M /swapfile || dd if=/dev/zero of=/swapfile bs=1M count=$swap_size status=progress
+            if ! fallocate -l ${swap_size}M /swapfile 2>/dev/null; then
+                dd if=/dev/zero of=/swapfile bs=1M count=$swap_size status=progress
+            fi
             chmod 600 /swapfile
             mkswap /swapfile >/dev/null || { echo "SWAP文件创建失败"; exit 1; }
             swapon /swapfile || { echo "SWAP激活失败"; exit 1; }
@@ -235,7 +242,9 @@ case ${choice^^} in
         elif [ "$total_mem" -ge 512 ] && [ "$total_mem" -lt 1024 ] && [ "$free_space" -gt 8192 ]; then
             swap_size=1024
             echo "自动配置 1024MB SWAP..."
-            fallocate -l ${swap_size}M /swapfile || dd if=/dev/zero of=/swapfile bs=1M count=$swap_size status=progress
+            if ! fallocate -l ${swap_size}M /swapfile 2>/dev/null; then
+                dd if=/dev/zero of=/swapfile bs=1M count=$swap_size status=progress
+            fi
             chmod 600 /swapfile
             mkswap /swapfile >/dev/null || { echo "SWAP文件创建失败"; exit 1; }
             swapon /swapfile || { echo "SWAP激活失败"; exit 1; }
@@ -243,7 +252,9 @@ case ${choice^^} in
         elif [ "$total_mem" -ge 1024 ] && [ "$total_mem" -lt 2048 ] && [ "$free_space" -gt 10240 ]; then
             swap_size=1024
             echo "自动配置 1024MB SWAP..."
-            fallocate -l ${swap_size}M /swapfile || dd if=/dev/zero of=/swapfile bs=1M count=$swap_size status=progress
+            if ! fallocate -l ${swap_size}M /swapfile 2>/dev/null; then
+                dd if=/dev/zero of=/swapfile bs=1M count=$swap_size status=progress
+            fi
             chmod 600 /swapfile
             mkswap /swapfile >/dev/null || { echo "SWAP文件创建失败"; exit 1; }
             swapon /swapfile || { echo "SWAP激活失败"; exit 1; }
