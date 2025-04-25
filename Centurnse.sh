@@ -5,29 +5,6 @@ if [ $(id -u) -ne 0 ]; then
     exit 1
 fi
 
-# Fix locale issues silently
-fix_locale() {
-    echo "检测到locale配置问题，正在修复..." > /dev/null
-    # 安装必要语言包
-    apt-get install -y locales > /dev/null 2>&1
-    # 配置locale
-    export LC_ALL="en_US.UTF-8"
-    export LANG="en_US.UTF-8"
-    export LANGUAGE="en_US:en"
-    # 取消注释需要的locale
-    sed -i '/en_US.UTF-8/s/^#//g' /etc/locale.gen
-    sed -i '/zh_CN.UTF-8/s/^#//g' /etc/locale.gen
-    # 生成locale
-    locale-gen > /dev/null 2>&1
-    update-locale LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8 > /dev/null 2>&1
-    dpkg-reconfigure --frontend=noninteractive locales > /dev/null 2>&1
-}
-
-# Check and fix locale
-if ! locale -a | grep -q "en_US.utf8"; then
-    fix_locale
-fi
-
 # Common functions
 countdown() {
     echo -n "下一步将在"
@@ -36,6 +13,48 @@ countdown() {
         sleep 1
     done
     echo
+}
+
+# Fix locale issues
+fix_locale() {
+    echo ">>> 正在修复locale设置 <<<"
+    # 检查是否存在locale问题
+    if grep -q "Can't set locale" /var/log/apt/term.log 2>/dev/null || \
+       grep -q "Setting locale failed" /var/log/apt/term.log 2>/dev/null || \
+       locale 2>&1 | grep -q "Cannot set LC" || \
+       [ -z "$LANG" ] || [ "$LANG" = "C" ] || [ "$LANG" = "POSIX" ]; then
+        
+        echo "检测到locale问题，正在修复..."
+        
+        # 安装必要的locale包
+        apt-get update -qq >/dev/null
+        DEBIAN_FRONTEND=noninteractive apt-get install -y locales locales-all >/dev/null
+        
+        # 生成并设置en_US.UTF-8为默认locale
+        sed -i '/en_US.UTF-8/s/^# //g' /etc/locale.gen
+        sed -i '/zh_CN.UTF-8/s/^# //g' /etc/locale.gen
+        locale-gen en_US.UTF-8 zh_CN.UTF-8 >/dev/null
+        
+        # 设置系统默认locale
+        update-locale LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 LANGUAGE=en_US:en
+        
+        # 设置当前shell的环境变量
+        export LANG=en_US.UTF-8
+        export LC_ALL=en_US.UTF-8
+        export LANGUAGE=en_US:en
+        
+        # 验证修复
+        if locale 2>&1 | grep -q "Cannot set LC"; then
+            echo "警告: 部分locale问题可能仍然存在，建议检查系统日志"
+            return 1
+        else
+            echo "locale问题已成功修复"
+            return 0
+        fi
+    else
+        echo "未检测到locale问题，跳过修复"
+        return 0
+    fi
 }
 
 # SSH安全配置函数
@@ -57,17 +76,17 @@ secure_ssh() {
     if [ -d "/etc/ssh/sshd_config.d" ]; then
         find /etc/ssh/sshd_config.d -name "*.conf" -type f | while read conf; do
             echo "处理配置文件：$conf"
-            [ -f "$conf" ] && {
-                cp "$conf" "${conf}.bak"
-                sed -i '/^#*PasswordAuthentication/c\PasswordAuthentication no' "$conf"
-            }
+            cp "$conf" "${conf}.bak"
+            sed -i '/^#*PasswordAuthentication/c\PasswordAuthentication no' "$conf"
         done
     fi
 
     # 根据服务名称重启SSH
     if systemctl list-unit-files --type=service | grep -q "^sshd.service"; then
+        echo "检测到sshd服务，正在重启..."
         systemctl restart sshd
     else
+        echo "检测到ssh服务，正在重启..."
         systemctl restart ssh
     fi
 }
@@ -83,33 +102,41 @@ echo "b) 云服务器配置 (按B键)"
 read -n1 -p "请输入选择 (A/B): " choice
 echo
 
+# 第一步总是修复locale问题
+echo "[1] 正在检查并修复locale设置..."
+fix_locale || {
+    echo "无法修复locale问题，脚本终止"
+    exit 1
+}
+countdown
+
 case ${choice^^} in
     A)
         echo "开始配置物理服务器..."
         
-        # Step 1: Update system
-        echo "[1/5] 正在更新系统..."
+        # Step 2: Update system
+        echo "[2/6] 正在更新系统..."
         apt-get update -qq >/dev/null
         DEBIAN_FRONTEND=noninteractive apt-get upgrade -y -qq >/dev/null
         countdown
         
-        # Step 2: Install packages
-        echo "[2/5] 正在安装基础组件..."
-        DEBIAN_FRONTEND=noninteractive apt-get install -y -qq sudo curl wget mtr >/dev/null
+        # Step 3: Install packages
+        echo "[3/6] 正在安装基础组件..."
+        DEBIAN_FRONTEND=noninteractive apt-get install -y -qq sudo curl wget mtr lvm2 >/dev/null
         countdown
         
-        # Step 3: Swap management
-        echo "[3/5] 正在处理SWAP..."
+        # Step 4: Swap management
+        echo "[4/6] 正在处理SWAP..."
         swapoff -a >/dev/null 2>&1
         sed -i '/swap/d' /etc/fstab
         
         # 处理LVM SWAP
         if command -v lvm >/dev/null; then
-            lv_path=$(lvs -o lv_path,vg_name,lv_name | grep -i swap | awk '{print $1}')
+            lv_path=$(lvs -o lv_path,vg_name,lv_name --noheadings 2>/dev/null | grep -i swap | awk '{print $1}')
             if [ -n "$lv_path" ]; then
                 lvchange -an "$lv_path" >/dev/null 2>&1
                 lvremove -f "$lv_path" >/dev/null 2>&1
-                root_lv=$(lvs -o lv_path,vg_name,lv_name | grep -i root | awk '{print $1}')
+                root_lv=$(lvs -o lv_path,vg_name,lv_name --noheadings 2>/dev/null | grep -i root | awk '{print $1}')
                 if [ -n "$root_lv" ]; then
                     lvextend -l +100%FREE "$root_lv" >/dev/null 2>&1
                     resize2fs "$root_lv" >/dev/null 2>&1
@@ -129,6 +156,7 @@ case ${choice^^} in
                     rm -f /swapfile >/dev/null 2>&1
                     # 使用更安全的方式创建大文件
                     if ! fallocate -l ${swap_size}G /swapfile 2>/dev/null; then
+                        echo "fallocate失败，尝试使用dd方式创建swap文件..."
                         dd if=/dev/zero of=/swapfile bs=1M count=$(($swap_size * 1024)) status=progress
                     fi
                     chmod 600 /swapfile
@@ -143,8 +171,8 @@ case ${choice^^} in
         fi
         countdown
         
-        # Step 4: Firewall configuration
-        echo "[4/5] 正在配置防火墙..."
+        # Step 5: Firewall configuration
+        echo "[5/6] 正在配置防火墙..."
         DEBIAN_FRONTEND=noninteractive apt-get install -y -qq ufw >/dev/null
         ufw --force reset >/dev/null
         ufw allow 22 >/dev/null
@@ -152,8 +180,8 @@ case ${choice^^} in
         echo "y" | ufw enable >/dev/null
         countdown
         
-        # Step 5: SSH configuration
-        echo "[5/5] 正在配置SSH..."
+        # Step 6: SSH configuration
+        echo "[6/6] 正在配置SSH..."
         mkdir -p /root/.ssh
         chmod 700 /root/.ssh
         touch /root/.ssh/authorized_keys
@@ -171,27 +199,26 @@ case ${choice^^} in
     B)
         echo "开始配置云服务器..."
         
-        # Step 1: Update system
-        echo "[1/9] 正在更新系统..."
+        # Step 2: Update system
+        echo "[2/10] 正在更新系统..."
         apt-get update -qq >/dev/null
         DEBIAN_FRONTEND=noninteractive apt-get upgrade -y -qq >/dev/null
         countdown
         
-        # Step 2: Install packages
-        echo "[2/9] 正在安装组件..."
-        DEBIAN_FRONTEND=noninteractive apt-get install -y -qq vim curl wget mtr sudo ufw >/dev/null
+        # Step 3: Install packages
+        echo "[3/10] 正在安装组件..."
+        DEBIAN_FRONTEND=noninteractive apt-get install -y -qq vim curl wget mtr sudo ufw chrony >/dev/null
         countdown
         
-        # Step 3: Time configuration
-        echo "[3/9] 正在调整时间..."
+        # Step 4: Time configuration
+        echo "[4/10] 正在调整时间..."
         timedatectl set-timezone Asia/Shanghai
-        DEBIAN_FRONTEND=noninteractive apt-get install -y -qq chrony >/dev/null
         systemctl restart chrony
         echo "0 * * * * /usr/bin/chronyc -a makestep >/dev/null 2>&1" > /etc/cron.d/timesync
         countdown
         
-        # Step 4: Firewall rules
-        echo "[4/9] 正在配置防火墙..."
+        # Step 5: Firewall rules
+        echo "[5/10] 正在配置防火墙..."
         ufw --force disable >/dev/null
         ufw --force reset >/dev/null
         for port in 22 2333 80 88 443 5555 8008 32767 32768; do
@@ -220,14 +247,17 @@ case ${choice^^} in
         echo "y" | ufw enable >/dev/null
         countdown
         
-        # Step 5: Swap configuration
-        echo "[5/9] 正在配置SWAP..."
+        # Step 6: Swap configuration
+        echo "[6/10] 正在配置SWAP..."
         swapoff -a >/dev/null 2>&1
         rm -f /swapfile >/dev/null 2>&1
         sed -i '/swapfile/d' /etc/fstab
 
-        total_mem=$(free -m | awk '/Mem:/ {print $2}')
-        free_space=$(df -m / | awk 'NR==2 {print $4}')
+        total_mem=$(free -m | awk '/Mem:/ {print $2}' | tr -cd '0-9')
+        free_space=$(df -m / | awk 'NR==2 {print $4}' | tr -cd '0-9')
+        
+        total_mem=${total_mem:-0}
+        free_space=${free_space:-0}
 
         if [ "$total_mem" -lt 512 ] && [ "$free_space" -gt 5120 ]; then
             swap_size=512
@@ -264,8 +294,8 @@ case ${choice^^} in
         fi
         countdown
         
-        # Step 6: Network tuning
-        echo "[6/9] 正在网络调优..."
+        # Step 7: Network tuning
+        echo "[7/10] 正在网络调优..."
         cat > /etc/sysctl.d/99-custom.conf <<EOF
 net.ipv4.tcp_no_metrics_save=1
 net.ipv4.tcp_ecn=0
@@ -293,13 +323,13 @@ EOF
         sysctl -p /etc/sysctl.d/99-custom.conf >/dev/null
         countdown
         
-        # Step 7: Log cleanup
-        echo "[7/9] 正在配置日志清理..."
+        # Step 8: Log cleanup
+        echo "[8/10] 正在配置日志清理..."
         echo "10 0 * * * find /var/log -type f -name \"*.log\" -exec truncate -s 0 {} \;" > /etc/cron.d/logclean
         countdown
         
-        # Step 8: SSH configuration
-        echo "[8/9] 正在配置SSH..."
+        # Step 9: SSH configuration
+        echo "[9/10] 正在配置SSH..."
         mkdir -p /root/.ssh
         chmod 700 /root/.ssh
         touch /root/.ssh/authorized_keys
@@ -308,8 +338,8 @@ EOF
         secure_ssh
         countdown
         
-        # Step 9: Finalization
-        echo "[9/9] 完成所有配置！"
+        # Step 10: Finalization
+        echo "[10/10] 完成所有配置！"
         echo "======================================"
         echo "云服务器配置已完成！"
         echo "请使用以下命令测试连接："
