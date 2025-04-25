@@ -1,55 +1,30 @@
 #!/bin/bash
-
-# 颜色定义
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[0;33m'
-BLUE='\033[0;34m'
-PURPLE='\033[0;35m'
-CYAN='\033[0;36m'
-NC='\033[0m' # No Color
-
-# 检查root权限
+# Check root privileges
 if [ $(id -u) -ne 0 ]; then
-    echo -e "${RED}✗ 此脚本必须以root权限运行${NC}" 1>&2
+    echo "This script must be run as root" 1>&2
     exit 1
 fi
 
-# 美化输出函数
-pretty_echo() {
-    echo -e "${BLUE}▸${NC} $1"
-}
-
-# 步骤计数器
-step_counter() {
-    echo -e "${PURPLE}[$1/$2]${NC} $3"
-}
-
-# 倒计时函数
+# Common functions
 countdown() {
-    echo -ne "${CYAN}下一步将在"
+    echo -n "下一步将在"
     for i in {3..1}; do
-        echo -ne " ${i}..."
+        echo -n " $i..."
         sleep 1
     done
-    echo -e "${NC}"
+    echo
 }
 
-# 修复locale问题
+# Fix locale issues
 fix_locale() {
-    # 重定向所有错误输出到临时文件
-    exec 3>&2
-    exec 2>/dev/null
-
-    pretty_echo "正在检查并修复locale设置..."
-    
+    echo ">>> 正在修复locale设置 <<<"
     # 检查是否存在locale问题
     if grep -q "Can't set locale" /var/log/apt/term.log 2>/dev/null || \
        grep -q "Setting locale failed" /var/log/apt/term.log 2>/dev/null || \
        locale 2>&1 | grep -q "Cannot set LC" || \
        [ -z "$LANG" ] || [ "$LANG" = "C" ] || [ "$LANG" = "POSIX" ]; then
         
-        pretty_echo "检测到locale问题，正在修复..."
+        echo "检测到locale问题，正在修复..."
         
         # 安装必要的locale包
         apt-get update -qq >/dev/null
@@ -70,23 +45,23 @@ fix_locale() {
         
         # 验证修复
         if locale 2>&1 | grep -q "Cannot set LC"; then
-            pretty_echo "${YELLOW}⚠ 部分locale问题可能仍然存在${NC}"
+            echo "警告: 部分locale问题可能仍然存在，建议检查系统日志"
+            return 1
         else
-            pretty_echo "${GREEN}✓ locale问题已修复${NC}"
+            echo "locale问题已成功修复"
+            return 0
         fi
     else
-        pretty_echo "${GREEN}✓ 未检测到locale问题${NC}"
+        echo "未检测到locale问题，跳过修复"
+        return 0
     fi
-
-    # 恢复错误输出
-    exec 2>&3
 }
 
 # SSH安全配置函数
 secure_ssh() {
-    pretty_echo "正在配置SSH安全设置..."
+    echo ">>> 正在配置SSH安全设置 <<<"
     local sshd_config="/etc/ssh/sshd_config"
-    [ -f "$sshd_config" ] || { pretty_echo "${RED}✗ SSH配置文件不存在${NC}"; return 1; }
+    [ -f "$sshd_config" ] || { echo "SSH配置文件不存在"; return 1; }
     
     # 备份原始配置
     cp "$sshd_config" "${sshd_config}.bak-$(date +%Y%m%d%H%M%S)"
@@ -100,7 +75,7 @@ secure_ssh() {
     # 仅处理sshd_config.d中的PasswordAuthentication
     if [ -d "/etc/ssh/sshd_config.d" ]; then
         find /etc/ssh/sshd_config.d -name "*.conf" -type f | while read conf; do
-            pretty_echo "处理配置文件：${CYAN}$conf${NC}"
+            echo "处理配置文件：$conf"
             cp "$conf" "${conf}.bak"
             sed -i '/^#*PasswordAuthentication/c\PasswordAuthentication no' "$conf"
         done
@@ -108,50 +83,50 @@ secure_ssh() {
 
     # 根据服务名称重启SSH
     if systemctl list-unit-files --type=service | grep -q "^sshd.service"; then
-        pretty_echo "检测到sshd服务，正在重启..."
+        echo "检测到sshd服务，正在重启..."
         systemctl restart sshd
     else
-        pretty_echo "检测到ssh服务，正在重启..."
+        echo "检测到ssh服务，正在重启..."
         systemctl restart ssh
     fi
-    
-    pretty_echo "${GREEN}✓ SSH安全配置完成${NC}"
 }
 
-# 主菜单
+# Main menu
 clear
-echo -e "${PURPLE}╔══════════════════════════════════════╗"
-echo -e "║         服务器初始化配置脚本         ║"
-echo -e "╚══════════════════════════════════════╝${NC}"
-echo -e "${YELLOW}请选择配置类型："
-echo -e "a) 物理服务器配置 (按A键)"
-echo -e "b) 云服务器配置 (按B键)${NC}"
+echo "======================================"
+echo "         服务器初始化配置脚本         "
+echo "======================================"
+echo "请选择配置类型："
+echo "a) 物理服务器配置 (按A键)"
+echo "b) 云服务器配置 (按B键)"
 read -n1 -p "请输入选择 (A/B): " choice
 echo
 
 # 第一步总是修复locale问题
-fix_locale
+echo "[1] 正在检查并修复locale设置..."
+fix_locale || {
+    echo "无法修复locale问题，脚本终止"
+    exit 1
+}
 countdown
 
 case ${choice^^} in
     A)
-        echo -e "${GREEN}开始配置物理服务器...${NC}"
+        echo "开始配置物理服务器..."
         
         # Step 2: Update system
-        step_counter 2 6 "正在更新系统..."
+        echo "[2/6] 正在更新系统..."
         apt-get update -qq >/dev/null
         DEBIAN_FRONTEND=noninteractive apt-get upgrade -y -qq >/dev/null
-        pretty_echo "${GREEN}✓ 系统更新完成${NC}"
         countdown
         
         # Step 3: Install packages
-        step_counter 3 6 "正在安装基础组件..."
+        echo "[3/6] 正在安装基础组件..."
         DEBIAN_FRONTEND=noninteractive apt-get install -y -qq sudo curl wget mtr lvm2 >/dev/null
-        pretty_echo "${GREEN}✓ 基础组件安装完成${NC}"
         countdown
         
         # Step 4: Swap management
-        step_counter 4 6 "正在处理SWAP..."
+        echo "[4/6] 正在处理SWAP..."
         swapoff -a >/dev/null 2>&1
         sed -i '/swap/d' /etc/fstab
         
@@ -171,45 +146,42 @@ case ${choice^^} in
         
         update-initramfs -u -k all >/dev/null 2>&1
         
-        read -p "$(echo -e "${YELLOW}是否建立新的SWAP？（输入YES继续，输入NO跳过）: ${NC}")" swap_choice
+        read -p "是否建立新的SWAP？（输入YES继续，输入NO跳过）: " swap_choice
         if [[ "${swap_choice^^}" == "YES" ]]; then
             while true; do
-                read -p "$(echo -e "${YELLOW}请输入SWAP大小（GB，最小1GB，最大9999GB）: ${NC}")" swap_size
+                read -p "请输入SWAP大小（GB，最小1GB，最大9999GB）: " swap_size
                 if [[ $swap_size =~ ^[0-9]+$ ]] && [ $swap_size -ge 1 ] && [ $swap_size -le 9999 ]; then
-                    pretty_echo "正在配置 ${swap_size}GB 的SWAP..."
+                    echo "正在配置 ${swap_size}GB 的SWAP（这可能需要几分钟）..."
                     swapoff -a >/dev/null 2>&1
                     rm -f /swapfile >/dev/null 2>&1
+                    # 使用更安全的方式创建大文件
                     if ! fallocate -l ${swap_size}G /swapfile 2>/dev/null; then
-                        pretty_echo "使用dd方式创建swap文件..."
-                        dd if=/dev/zero of=/swapfile bs=1M count=$(($swap_size * 1024)) status=none
+                        echo "fallocate失败，尝试使用dd方式创建swap文件..."
+                        dd if=/dev/zero of=/swapfile bs=1M count=$(($swap_size * 1024)) status=progress
                     fi
                     chmod 600 /swapfile
-                    mkswap /swapfile >/dev/null || { pretty_echo "${RED}✗ SWAP文件创建失败${NC}"; exit 1; }
-                    swapon /swapfile || { pretty_echo "${RED}✗ SWAP激活失败${NC}"; exit 1; }
+                    mkswap /swapfile >/dev/null || { echo "SWAP文件创建失败，请检查磁盘空间"; exit 1; }
+                    swapon /swapfile || { echo "SWAP激活失败，请检查日志"; exit 1; }
                     echo "/swapfile none swap sw 0 0" >> /etc/fstab
-                    pretty_echo "${GREEN}✓ SWAP配置完成${NC}"
                     break
                 else
-                    pretty_echo "${RED}输入无效，请输入1-9999之间的整数${NC}"
+                    echo "输入无效，请输入1-9999之间的整数"
                 fi
             done
-        else
-            pretty_echo "${YELLOW}跳过SWAP配置${NC}"
         fi
         countdown
         
         # Step 5: Firewall configuration
-        step_counter 5 6 "正在配置防火墙..."
+        echo "[5/6] 正在配置防火墙..."
         DEBIAN_FRONTEND=noninteractive apt-get install -y -qq ufw >/dev/null
         ufw --force reset >/dev/null
         ufw allow 22 >/dev/null
         ufw allow 2333 >/dev/null
         echo "y" | ufw enable >/dev/null
-        pretty_echo "${GREEN}✓ 防火墙配置完成${NC}"
         countdown
         
         # Step 6: SSH configuration
-        step_counter 6 6 "正在配置SSH..."
+        echo "[6/6] 正在配置SSH..."
         mkdir -p /root/.ssh
         chmod 700 /root/.ssh
         touch /root/.ssh/authorized_keys
@@ -217,39 +189,36 @@ case ${choice^^} in
         echo "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKcz1QIr900sswIHYwkkdeYK0BSP7tufSe0XeyRq1Mpj centurnse@Centurnse-I" >> /root/.ssh/authorized_keys
         secure_ssh
         
-        echo -e "${PURPLE}╔══════════════════════════════════════╗"
-        echo -e "║         物理服务器配置已完成！       ║"
-        echo -e "╚══════════════════════════════════════╝${NC}"
-        echo -e "${CYAN}请使用以下命令测试连接："
-        echo -e "ssh -p 2333 root@您的服务器IP${NC}"
+        echo "======================================"
+        echo "物理服务器配置已完成！"
+        echo "请使用以下命令测试连接："
+        echo "ssh -p 2333 root@您的服务器IP"
+        echo "======================================"
         ;;
     
     B)
-        echo -e "${GREEN}开始配置云服务器...${NC}"
+        echo "开始配置云服务器..."
         
         # Step 2: Update system
-        step_counter 2 10 "正在更新系统..."
+        echo "[2/10] 正在更新系统..."
         apt-get update -qq >/dev/null
         DEBIAN_FRONTEND=noninteractive apt-get upgrade -y -qq >/dev/null
-        pretty_echo "${GREEN}✓ 系统更新完成${NC}"
         countdown
         
         # Step 3: Install packages
-        step_counter 3 10 "正在安装组件..."
+        echo "[3/10] 正在安装组件..."
         DEBIAN_FRONTEND=noninteractive apt-get install -y -qq vim curl wget mtr sudo ufw chrony >/dev/null
-        pretty_echo "${GREEN}✓ 组件安装完成${NC}"
         countdown
         
         # Step 4: Time configuration
-        step_counter 4 10 "正在调整时间..."
+        echo "[4/10] 正在调整时间..."
         timedatectl set-timezone Asia/Shanghai
         systemctl restart chrony
         echo "0 * * * * /usr/bin/chronyc -a makestep >/dev/null 2>&1" > /etc/cron.d/timesync
-        pretty_echo "${GREEN}✓ 时间配置完成${NC}"
         countdown
         
         # Step 5: Firewall rules
-        step_counter 5 10 "正在配置防火墙..."
+        echo "[5/10] 正在配置防火墙..."
         ufw --force disable >/dev/null
         ufw --force reset >/dev/null
         for port in 22 2333 80 88 443 5555 8008 32767 32768; do
@@ -276,70 +245,57 @@ case ${choice^^} in
         done
         
         echo "y" | ufw enable >/dev/null
-        pretty_echo "${GREEN}✓ 防火墙配置完成${NC}"
         countdown
         
-        # Step 6: Swap configuration (修复后的SWAP规则)
-        step_counter 6 10 "正在配置SWAP..."
+        # Step 6: Swap configuration
+        echo "[6/10] 正在配置SWAP..."
         swapoff -a >/dev/null 2>&1
         rm -f /swapfile >/dev/null 2>&1
         sed -i '/swapfile/d' /etc/fstab
 
-        # 获取内存和磁盘空间(以MB为单位)
-        total_mem=$(free -m | awk '/Mem:/ {print $2}')
-        free_space=$(df -m / | awk 'NR==2 {print $4}')
+        total_mem=$(free -m | awk '/Mem:/ {print $2}' | tr -cd '0-9')
+        free_space=$(df -m / | awk 'NR==2 {print $4}' | tr -cd '0-9')
         
-        # 设置默认值防止空值
         total_mem=${total_mem:-0}
         free_space=${free_space:-0}
 
-        # 根据规则配置SWAP
-        if [ $total_mem -lt 512 ] && [ $free_space -gt 5120 ]; then
+        if [ "$total_mem" -lt 512 ] && [ "$free_space" -gt 5120 ]; then
             swap_size=512
-            pretty_echo "RAM < 512MB 且 磁盘空间 > 5GB，设置512MB SWAP..."
+            echo "自动配置 512MB SWAP..."
             if ! fallocate -l ${swap_size}M /swapfile 2>/dev/null; then
-                pretty_echo "使用dd方式创建swap文件..."
-                dd if=/dev/zero of=/swapfile bs=1M count=$swap_size status=none
+                dd if=/dev/zero of=/swapfile bs=1M count=$swap_size status=progress
             fi
             chmod 600 /swapfile
-            mkswap /swapfile >/dev/null || { pretty_echo "${RED}✗ SWAP文件创建失败${NC}"; exit 1; }
-            swapon /swapfile || { pretty_echo "${RED}✗ SWAP激活失败${NC}"; exit 1; }
+            mkswap /swapfile >/dev/null || { echo "SWAP文件创建失败"; exit 1; }
+            swapon /swapfile || { echo "SWAP激活失败"; exit 1; }
             echo "/swapfile none swap sw 0 0" >> /etc/fstab
-            pretty_echo "${GREEN}✓ 512MB SWAP配置完成${NC}"
-        elif [ $total_mem -ge 512 ] && [ $total_mem -lt 1024 ] && [ $free_space -gt 8192 ]; then
+        elif [ "$total_mem" -ge 512 ] && [ "$total_mem" -lt 1024 ] && [ "$free_space" -gt 8192 ]; then
             swap_size=1024
-            pretty_echo "RAM 512MB-1GB 且 磁盘空间 > 8GB，设置1GB SWAP..."
+            echo "自动配置 1024MB SWAP..."
             if ! fallocate -l ${swap_size}M /swapfile 2>/dev/null; then
-                pretty_echo "使用dd方式创建swap文件..."
-                dd if=/dev/zero of=/swapfile bs=1M count=$swap_size status=none
+                dd if=/dev/zero of=/swapfile bs=1M count=$swap_size status=progress
             fi
             chmod 600 /swapfile
-            mkswap /swapfile >/dev/null || { pretty_echo "${RED}✗ SWAP文件创建失败${NC}"; exit 1; }
-            swapon /swapfile || { pretty_echo "${RED}✗ SWAP激活失败${NC}"; exit 1; }
+            mkswap /swapfile >/dev/null || { echo "SWAP文件创建失败"; exit 1; }
+            swapon /swapfile || { echo "SWAP激活失败"; exit 1; }
             echo "/swapfile none swap sw 0 0" >> /etc/fstab
-            pretty_echo "${GREEN}✓ 1GB SWAP配置完成${NC}"
-        elif [ $total_mem -ge 1024 ] && [ $total_mem -lt 2048 ] && [ $free_space -gt 10240 ]; then
+        elif [ "$total_mem" -ge 1024 ] && [ "$total_mem" -lt 2048 ] && [ "$free_space" -gt 10240 ]; then
             swap_size=1024
-            pretty_echo "RAM 1GB-2GB 且 磁盘空间 > 10GB，设置1GB SWAP..."
+            echo "自动配置 1024MB SWAP..."
             if ! fallocate -l ${swap_size}M /swapfile 2>/dev/null; then
-                pretty_echo "使用dd方式创建swap文件..."
-                dd if=/dev/zero of=/swapfile bs=1M count=$swap_size status=none
+                dd if=/dev/zero of=/swapfile bs=1M count=$swap_size status=progress
             fi
             chmod 600 /swapfile
-            mkswap /swapfile >/dev/null || { pretty_echo "${RED}✗ SWAP文件创建失败${NC}"; exit 1; }
-            swapon /swapfile || { pretty_echo "${RED}✗ SWAP激活失败${NC}"; exit 1; }
+            mkswap /swapfile >/dev/null || { echo "SWAP文件创建失败"; exit 1; }
+            swapon /swapfile || { echo "SWAP激活失败"; exit 1; }
             echo "/swapfile none swap sw 0 0" >> /etc/fstab
-            pretty_echo "${GREEN}✓ 1GB SWAP配置完成${NC}"
-        elif [ $total_mem -ge 2048 ]; then
-            pretty_echo "${YELLOW}RAM ≥ 2GB，跳过SWAP配置${NC}"
         else
-            pretty_echo "${YELLOW}磁盘空间不足，跳过SWAP配置${NC}"
-            pretty_echo "当前内存: ${total_mem}MB, 可用空间: ${free_space}MB"
+            echo "内存充足，跳过SWAP配置"
         fi
         countdown
         
         # Step 7: Network tuning
-        step_counter 7 10 "正在网络调优..."
+        echo "[7/10] 正在网络调优..."
         cat > /etc/sysctl.d/99-custom.conf <<EOF
 net.ipv4.tcp_no_metrics_save=1
 net.ipv4.tcp_ecn=0
@@ -365,17 +321,15 @@ net.ipv4.conf.all.forwarding=1
 net.ipv4.conf.default.forwarding=1
 EOF
         sysctl -p /etc/sysctl.d/99-custom.conf >/dev/null
-        pretty_echo "${GREEN}✓ 网络调优完成${NC}"
         countdown
         
         # Step 8: Log cleanup
-        step_counter 8 10 "正在配置日志清理..."
+        echo "[8/10] 正在配置日志清理..."
         echo "10 0 * * * find /var/log -type f -name \"*.log\" -exec truncate -s 0 {} \;" > /etc/cron.d/logclean
-        pretty_echo "${GREEN}✓ 日志清理配置完成${NC}"
         countdown
         
         # Step 9: SSH configuration
-        step_counter 9 10 "正在配置SSH..."
+        echo "[9/10] 正在配置SSH..."
         mkdir -p /root/.ssh
         chmod 700 /root/.ssh
         touch /root/.ssh/authorized_keys
@@ -385,15 +339,15 @@ EOF
         countdown
         
         # Step 10: Finalization
-        step_counter 10 10 "完成所有配置！"
-        echo -e "${PURPLE}╔══════════════════════════════════════╗"
-        echo -e "║         云服务器配置已完成！       ║"
-        echo -e "╚══════════════════════════════════════╝${NC}"
-        echo -e "${CYAN}请使用以下命令测试连接："
-        echo -e "ssh -p 2333 root@您的服务器IP${NC}"
+        echo "[10/10] 完成所有配置！"
+        echo "======================================"
+        echo "云服务器配置已完成！"
+        echo "请使用以下命令测试连接："
+        echo "ssh -p 2333 root@您的服务器IP"
+        echo "======================================"
         ;;
     *)
-        echo -e "${RED}✗ 无效选择！脚本退出。${NC}"
+        echo "无效选择！脚本退出。"
         exit 1
         ;;
 esac
