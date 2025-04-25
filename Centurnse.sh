@@ -5,6 +5,23 @@ if [ $(id -u) -ne 0 ]; then
     exit 1
 fi
 
+# Fix locale issues silently
+fix_locale() {
+    echo "检测到locale配置问题，正在修复..." > /dev/null
+    export LC_ALL="en_US.UTF-8"
+    export LANG="en_US.UTF-8"
+    export LANGUAGE="en_US:en"
+    sed -i '/^#.*zh_CN.UTF-8/s/^#//' /etc/locale.gen
+    sed -i '/^#.*en_US.UTF-8/s/^#//' /etc/locale.gen
+    locale-gen > /dev/null 2>&1
+    update-locale LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8 > /dev/null 2>&1
+}
+
+# Check and fix locale
+if ! locale -a | grep -q "en_US.utf8"; then
+    fix_locale
+fi
+
 # Common functions
 countdown() {
     echo -n "下一步将在"
