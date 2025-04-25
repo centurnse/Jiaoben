@@ -279,53 +279,62 @@ case ${choice^^} in
         pretty_echo "${GREEN}✓ 防火墙配置完成${NC}"
         countdown
         
-        # Step 6: Swap configuration
+        # Step 6: Swap configuration (修复后的SWAP规则)
         step_counter 6 10 "正在配置SWAP..."
         swapoff -a >/dev/null 2>&1
         rm -f /swapfile >/dev/null 2>&1
         sed -i '/swapfile/d' /etc/fstab
 
-        total_mem=$(free -m | awk '/Mem:/ {print $2}' | tr -cd '0-9')
-        free_space=$(df -m / | awk 'NR==2 {print $4}' | tr -cd '0-9')
+        # 获取内存和磁盘空间(以MB为单位)
+        total_mem=$(free -m | awk '/Mem:/ {print $2}')
+        free_space=$(df -m / | awk 'NR==2 {print $4}')
         
+        # 设置默认值防止空值
         total_mem=${total_mem:-0}
         free_space=${free_space:-0}
 
-        if [ "$total_mem" -lt 512 ] && [ "$free_space" -gt 5120 ]; then
+        # 根据规则配置SWAP
+        if [ $total_mem -lt 512 ] && [ $free_space -gt 5120 ]; then
             swap_size=512
-            pretty_echo "自动配置 512MB SWAP..."
+            pretty_echo "RAM < 512MB 且 磁盘空间 > 5GB，设置512MB SWAP..."
             if ! fallocate -l ${swap_size}M /swapfile 2>/dev/null; then
+                pretty_echo "使用dd方式创建swap文件..."
                 dd if=/dev/zero of=/swapfile bs=1M count=$swap_size status=none
             fi
             chmod 600 /swapfile
             mkswap /swapfile >/dev/null || { pretty_echo "${RED}✗ SWAP文件创建失败${NC}"; exit 1; }
             swapon /swapfile || { pretty_echo "${RED}✗ SWAP激活失败${NC}"; exit 1; }
             echo "/swapfile none swap sw 0 0" >> /etc/fstab
-            pretty_echo "${GREEN}✓ SWAP配置完成${NC}"
-        elif [ "$total_mem" -ge 512 ] && [ "$total_mem" -lt 1024 ] && [ "$free_space" -gt 8192 ]; then
+            pretty_echo "${GREEN}✓ 512MB SWAP配置完成${NC}"
+        elif [ $total_mem -ge 512 ] && [ $total_mem -lt 1024 ] && [ $free_space -gt 8192 ]; then
             swap_size=1024
-            pretty_echo "自动配置 1024MB SWAP..."
+            pretty_echo "RAM 512MB-1GB 且 磁盘空间 > 8GB，设置1GB SWAP..."
             if ! fallocate -l ${swap_size}M /swapfile 2>/dev/null; then
+                pretty_echo "使用dd方式创建swap文件..."
                 dd if=/dev/zero of=/swapfile bs=1M count=$swap_size status=none
             fi
             chmod 600 /swapfile
             mkswap /swapfile >/dev/null || { pretty_echo "${RED}✗ SWAP文件创建失败${NC}"; exit 1; }
             swapon /swapfile || { pretty_echo "${RED}✗ SWAP激活失败${NC}"; exit 1; }
             echo "/swapfile none swap sw 0 0" >> /etc/fstab
-            pretty_echo "${GREEN}✓ SWAP配置完成${NC}"
-        elif [ "$total_mem" -ge 1024 ] && [ "$total_mem" -lt 2048 ] && [ "$free_space" -gt 10240 ]; then
+            pretty_echo "${GREEN}✓ 1GB SWAP配置完成${NC}"
+        elif [ $total_mem -ge 1024 ] && [ $total_mem -lt 2048 ] && [ $free_space -gt 10240 ]; then
             swap_size=1024
-            pretty_echo "自动配置 1024MB SWAP..."
+            pretty_echo "RAM 1GB-2GB 且 磁盘空间 > 10GB，设置1GB SWAP..."
             if ! fallocate -l ${swap_size}M /swapfile 2>/dev/null; then
+                pretty_echo "使用dd方式创建swap文件..."
                 dd if=/dev/zero of=/swapfile bs=1M count=$swap_size status=none
             fi
             chmod 600 /swapfile
             mkswap /swapfile >/dev/null || { pretty_echo "${RED}✗ SWAP文件创建失败${NC}"; exit 1; }
             swapon /swapfile || { pretty_echo "${RED}✗ SWAP激活失败${NC}"; exit 1; }
             echo "/swapfile none swap sw 0 0" >> /etc/fstab
-            pretty_echo "${GREEN}✓ SWAP配置完成${NC}"
+            pretty_echo "${GREEN}✓ 1GB SWAP配置完成${NC}"
+        elif [ $total_mem -ge 2048 ]; then
+            pretty_echo "${YELLOW}RAM ≥ 2GB，跳过SWAP配置${NC}"
         else
-            pretty_echo "${YELLOW}内存充足，跳过SWAP配置${NC}"
+            pretty_echo "${YELLOW}磁盘空间不足，跳过SWAP配置${NC}"
+            pretty_echo "当前内存: ${total_mem}MB, 可用空间: ${free_space}MB"
         fi
         countdown
         
