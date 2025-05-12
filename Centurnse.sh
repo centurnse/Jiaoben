@@ -153,7 +153,7 @@ case ${choice^^} in
         
         # Step 3: Install packages
         step_counter 3 6 "正在安装基础组件..."
-        DEBIAN_FRONTEND=noninteractive apt-get install -y -qq sudo curl wget mtr lvm2 >/dev/null
+        DEBIAN_FRONTEND=noninteractive apt-get install -y -qq sudo curl wget mtr lvm2 unzip >/dev/null
         pretty_echo "${GREEN}✓ 基础组件安装完成${NC}"
         countdown
         
@@ -243,7 +243,7 @@ case ${choice^^} in
         
         # Step 3: Install packages
         step_counter 3 10 "正在安装组件..."
-        DEBIAN_FRONTEND=noninteractive apt-get install -y -qq vim curl wget mtr sudo ufw chrony >/dev/null
+        DEBIAN_FRONTEND=noninteractive apt-get install -y -qq vim curl wget mtr sudo ufw unzip chrony >/dev/null
         pretty_echo "${GREEN}✓ 组件安装完成${NC}"
         countdown
         
