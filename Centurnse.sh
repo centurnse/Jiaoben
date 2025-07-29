@@ -209,8 +209,15 @@ case ${choice^^} in
         step_counter 5 6 "正在配置防火墙..."
         DEBIAN_FRONTEND=noninteractive apt-get install -y -qq ufw >/dev/null
         ufw --force reset >/dev/null
-        ufw allow 22 >/dev/null
-        ufw allow 2333 >/dev/null
+
+        # 允许入站 22 和 2333 端口
+        ufw allow in 22/tcp >/dev/null
+        ufw allow in 2333/tcp >/dev/null
+
+        # 阻止出站 22 和 2333 端口
+        ufw deny out to any port 22 proto tcp >/dev/null
+        ufw deny out to any port 2333 proto tcp >/dev/null
+
         echo "y" | ufw enable >/dev/null
         pretty_echo "${GREEN}✓ 防火墙配置完成${NC}"
         countdown
