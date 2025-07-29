@@ -262,6 +262,8 @@ case ${choice^^} in
         for port in 22 2333 80 88 443 5555 8008 32767 32768; do
             ufw allow "$port" >/dev/null
         done
+        ufw allow 8443 >/dev/null        # ✅ 新增
+        ufw deny out to any port 22 >/dev/null  # ❌ 新增
         
         blocked_ips=(
             "162.142.125.0/24"
